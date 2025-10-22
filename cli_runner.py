@@ -55,13 +55,6 @@ def main():
     """Main CLI function"""
     print_banner()
 
-    # Check for OpenRouter API key
-    api_key = os.getenv("OPENROUTER_API_KEY")
-    if not api_key:
-        print("❌ Error: OPENROUTER_API_KEY not found!")
-        print("Please set OPENROUTER_API_KEY in your .env file")
-        sys.exit(1)
-
     # Initialize components
     try:
         print("⏳ Initializing bot...")
@@ -69,12 +62,15 @@ def main():
         db_path = os.getenv("DATABASE_PATH", "financial_bot_cli.db")
         database = DatabaseManager(db_path)
 
-        model = os.getenv("OPENROUTER_MODEL", "anthropic/claude-3-haiku")
-        llm_agent = LLMAgent(api_key, model)
+        model = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        api_key = os.getenv("OLLAMA_API_KEY")
+        llm_agent = LLMAgent(api_key=api_key, model=model, base_url=base_url)
 
         bot_core = FinancialBotCore(llm_agent, database)
 
         print(f"✅ Bot initialized with model: {model}")
+        print(f"Ollama URL: {llm_agent.base_url}")
         print(f"📦 Database: {db_path}\n")
 
     except Exception as e:

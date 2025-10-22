@@ -51,13 +51,11 @@ class FinancialDiscordBot(discord.Client):
             logger.info(f"Database initialized: {db_path}")
 
             # Initialize LLM Agent
-            api_key = os.getenv("OPENROUTER_API_KEY")
-            if not api_key:
-                raise ValueError("OPENROUTER_API_KEY not found in environment variables!")
-
-            model = os.getenv("OPENROUTER_MODEL", "anthropic/claude-3-haiku")
-            self.llm_agent = LLMAgent(api_key, model)
-            logger.info(f"LLM Agent initialized with model: {model}")
+            model = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+            base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+            api_key = os.getenv("OLLAMA_API_KEY")
+            self.llm_agent = LLMAgent(api_key=api_key, model=model, base_url=base_url)
+            logger.info(f"LLM Agent initialized with model: {model} ({self.llm_agent.base_url})")
 
             # Initialize bot core
             self.bot_core = FinancialBotCore(self.llm_agent, self.database)
@@ -162,16 +160,9 @@ def main():
         print("Please add your Discord bot token to the .env file")
         sys.exit(1)
 
-    # Check for OpenRouter API key
-    openrouter_key = os.getenv("OPENROUTER_API_KEY")
-    if not openrouter_key:
-        logger.error("OPENROUTER_API_KEY not found in environment variables!")
-        print("❌ Error: OPENROUTER_API_KEY not set in .env file!")
-        print("Please add your OpenRouter API key to the .env file")
-        sys.exit(1)
-
     print("🚀 Starting Financial Bot...")
-    print(f"📦 Model: {os.getenv('OPENROUTER_MODEL', 'anthropic/claude-3-haiku')}")
+    print(f"📦 Model: {os.getenv('OLLAMA_MODEL', 'llama3.1:8b')}")
+    print(f"Ollama URL: {os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')}")
     print("⏳ Connecting to Discord...")
 
     # Create and run bot

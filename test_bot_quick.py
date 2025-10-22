@@ -21,14 +21,15 @@ load_dotenv()
 def test_bot():
     """Test bot with a simple message"""
     print("🔧 Testing FinancialBot...")
-    print(f"📦 Model: {os.getenv('OPENROUTER_MODEL')}")
+    print(f"📦 Model: {os.getenv('OLLAMA_MODEL', 'llama3.1:8b')}")
 
     # Initialize components
     db = DatabaseManager("test_quick.db")
-    api_key = os.getenv("OPENROUTER_API_KEY")
-    model = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free")
+    api_key = os.getenv("OLLAMA_API_KEY")
+    model = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
-    llm_agent = LLMAgent(api_key, model)
+    llm_agent = LLMAgent(api_key=api_key, model=model, base_url=base_url)
     bot_core = FinancialBotCore(llm_agent, db)
 
     print("✅ Bot initialized\n")

@@ -1,32 +1,49 @@
 """
-LLM Agent menggunakan OpenRouter API untuk natural language understanding
+LLM Agent menggunakan Ollama (OpenAI-compatible) untuk natural language understanding
 """
 
 import os
 import json
 import logging
 from typing import Dict, List, Optional
-from openai import OpenAI
+
+import httpx
+
 from .prompts import SYSTEM_PROMPT, FUNCTION_TOOLS, get_user_context_prompt, ERROR_RESPONSES
 
 logger = logging.getLogger(__name__)
 
+
 class LLMAgent:
     """Agent yang menggunakan LLM untuk memahami intent pengguna"""
 
-    def __init__(self, api_key: str, model: str = "anthropic/claude-3-haiku"):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+        base_url: Optional[str] = None,
+    ):
         """
-        Initialize LLM Agent dengan OpenRouter
+        Initialize LLM Agent dengan Ollama lokal
 
         Args:
-            api_key: OpenRouter API key
-            model: Model yang akan digunakan (default: claude-3-haiku)
+            api_key: Optional override API key (Ollama tidak membutuhkan real key)
+            model: Model yang akan digunakan (default: llama3.1:8b)
+            base_url: Optional override base URL untuk Ollama server
         """
-        self.client = OpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=api_key
-        )
-        self.model = model
+
+        raw_base_url = base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        # Ensure base URL always points to /v1 for OpenAI-compatible routes
+        normalized = raw_base_url.rstrip("/")
+        if not normalized.endswith("/v1"):
+            normalized = f"{normalized}/v1"
+        self.base_url = normalized
+
+        resolved_api_key = api_key or os.getenv("OLLAMA_API_KEY", "ollama")
+        headers = {"Authorization": f"Bearer {resolved_api_key}"} if resolved_api_key else {}
+        self.client = httpx.Client(base_url=self.base_url, headers=headers, timeout=60.0)
+
+        self.model = model or os.getenv("OLLAMA_MODEL", "llama3.1:8b")
         self.conversation_history: Dict[str, List[Dict]] = {}  # user_id -> messages
         self.max_history = 5  # Simpan 5 message terakhir untuk konteks
 
@@ -97,54 +114,63 @@ class LLMAgent:
             # Build messages
             messages = self._build_messages(message, user_context, history)
 
-            # Call OpenRouter API
-            logger.info(f"Calling OpenRouter API for user {user_id}")
+            # Call local Ollama API
+            logger.info(f"Calling Ollama model for user {user_id}")
 
-            # Try with function calling first (for models that support it)
+            payload = {
+                "model": self.model,
+                "messages": messages,
+                "temperature": 0.7,
+                "max_tokens": 1000,
+            }
+
             use_function_calling = False
+            response_data: Optional[Dict] = None
+
+            # Try function-calling mode first
             try:
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    tools=FUNCTION_TOOLS,
-                    tool_choice="auto",
-                    temperature=0.7,
-                    max_tokens=1000
-                )
+                fc_payload = {**payload, "tools": FUNCTION_TOOLS, "tool_choice": "auto"}
+                resp = self.client.post("/chat/completions", json=fc_payload)
+                resp.raise_for_status()
+                response_data = resp.json()
                 use_function_calling = True
                 logger.info("Using function calling mode")
-            except Exception as e:
-                # If function calling fails, use standard mode and parse JSON from content
-                error_msg = str(e).lower()
-                if "tool" in error_msg or "function" in error_msg or "404" in error_msg:
-                    logger.info(f"Function calling not supported, using JSON mode")
-                    response = self.client.chat.completions.create(
-                        model=self.model,
-                        messages=messages,
-                        temperature=0.7,
-                        max_tokens=1500
-                    )
-                    use_function_calling = False
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code in (400, 404):
+                    logger.info("Function calling not supported, retrying without tools")
                 else:
-                    # Some other error, re-raise
                     raise
 
+            # Fallback to standard JSON mode if needed
+            if response_data is None:
+                resp = self.client.post("/chat/completions", json=payload)
+                resp.raise_for_status()
+                response_data = resp.json()
+                use_function_calling = False
+
             # Parse response
-            response_message = response.choices[0].message
+            choices = response_data.get("choices", [])
+            if not choices:
+                raise ValueError("No choices returned from Ollama")
+
+            response_message = choices[0].get("message", {})
 
             # Add to conversation history
             self._add_to_history(user_id, "user", message)
 
             # Parse based on response type
-            if use_function_calling and response_message.tool_calls:
+            tool_calls = response_message.get("tool_calls") or []
+
+            if use_function_calling and tool_calls:
                 # Function calling mode
-                tool_call = response_message.tool_calls[0]
-                function_args = json.loads(tool_call.function.arguments)
+                tool_call = tool_calls[0]
+                function_args_raw = tool_call.get("function", {}).get("arguments", "{}")
+                function_args = json.loads(function_args_raw)
                 result = self._validate_function_response(function_args)
             else:
                 # JSON mode - parse content as JSON
                 try:
-                    response_text = response_message.content or "{}"
+                    response_text = response_message.get("content") or "{}"
 
                     # DeepSeek R1 models may include <think> tags, extract JSON from content
                     # Remove think tags if present
