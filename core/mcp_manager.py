@@ -70,10 +70,15 @@ class MCPManager:
             filename = f"financial_report_{user_id}_{timestamp}.csv"
             filepath = self.export_dir / filename
 
-            # Export to CSV
-            df.to_csv(filepath, index=False, encoding='utf-8-sig')
+            # Export to CSV with explicit file handling
+            with open(filepath, 'w', encoding='utf-8-sig', newline='') as f:
+                df.to_csv(f, index=False)
 
-            logger.info(f"Exported CSV for user {user_id}: {filepath}")
+            # Verify file was created successfully
+            if not filepath.exists():
+                raise FileNotFoundError(f"CSV file was not created: {filepath}")
+
+            logger.info(f"Exported CSV for user {user_id}: {filepath} (size: {filepath.stat().st_size} bytes)")
 
             return {
                 "success": True,
@@ -116,8 +121,10 @@ class MCPManager:
             filename = f"financial_report_{user_id}_{timestamp}.xlsx"
             filepath = self.export_dir / filename
 
-            # Create Excel writer
-            with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
+            # Create Excel writer with explicit engine and mode
+            writer = pd.ExcelWriter(filepath, engine='openpyxl', mode='w')
+
+            try:
                 # Sheet 1: Transactions
                 df_trans = pd.DataFrame(transactions)
                 column_order = ['date', 'type', 'amount', 'category', 'description']
@@ -157,7 +164,15 @@ class MCPManager:
                         df_category = pd.DataFrame(category_data)
                         df_category.to_excel(writer, sheet_name='Categories', index=False)
 
-            logger.info(f"Exported Excel for user {user_id}: {filepath}")
+            finally:
+                # Explicitly save and close the writer
+                writer.close()
+
+            # Verify file was created successfully
+            if not filepath.exists():
+                raise FileNotFoundError(f"Excel file was not created: {filepath}")
+
+            logger.info(f"Exported Excel for user {user_id}: {filepath} (size: {filepath.stat().st_size} bytes)")
 
             return {
                 "success": True,

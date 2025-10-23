@@ -1,5 +1,5 @@
 """
-LLM Agent menggunakan Ollama (OpenAI-compatible) untuk natural language understanding
+LLM Agent menggunakan Ollama native API untuk natural language understanding
 """
 
 import os
@@ -24,24 +24,20 @@ class LLMAgent:
         base_url: Optional[str] = None,
     ):
         """
-        Initialize LLM Agent dengan Ollama lokal
+        Initialize LLM Agent dengan Ollama lokal menggunakan native API
 
         Args:
-            api_key: Optional override API key (Ollama tidak membutuhkan real key)
+            api_key: Optional override API key (Ollama tidak membutuhkan key)
             model: Model yang akan digunakan (default: llama3.1:8b)
             base_url: Optional override base URL untuk Ollama server
         """
 
+        # Use Ollama's native API endpoint (no /v1 prefix)
         raw_base_url = base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        # Ensure base URL always points to /v1 for OpenAI-compatible routes
-        normalized = raw_base_url.rstrip("/")
-        if not normalized.endswith("/v1"):
-            normalized = f"{normalized}/v1"
-        self.base_url = normalized
+        self.base_url = raw_base_url.rstrip("/")
 
-        resolved_api_key = api_key or os.getenv("OLLAMA_API_KEY", "ollama")
-        headers = {"Authorization": f"Bearer {resolved_api_key}"} if resolved_api_key else {}
-        self.client = httpx.Client(base_url=self.base_url, headers=headers, timeout=60.0)
+        # Ollama native API doesn't require authorization headers
+        self.client = httpx.Client(base_url=self.base_url, timeout=120.0)
 
         self.model = model or os.getenv("OLLAMA_MODEL", "llama3.1:8b")
         self.conversation_history: Dict[str, List[Dict]] = {}  # user_id -> messages
@@ -87,7 +83,7 @@ class LLMAgent:
                        balance_data: Optional[Dict] = None,
                        recent_transactions: Optional[List] = None) -> Dict:
         """
-        Proses pesan dari user menggunakan LLM
+        Proses pesan dari user menggunakan Ollama native API dengan prompt engineering
 
         Args:
             user_id: ID pengguna
@@ -114,92 +110,65 @@ class LLMAgent:
             # Build messages
             messages = self._build_messages(message, user_context, history)
 
-            # Call local Ollama API
-            logger.info(f"Calling Ollama model for user {user_id}")
+            # Call Ollama native API at /api/chat
+            logger.info(f"Calling Ollama native API ({self.model}) for user {user_id}")
 
+            # Ollama native API payload format
             payload = {
                 "model": self.model,
                 "messages": messages,
-                "temperature": 0.7,
-                "max_tokens": 1000,
+                "stream": False,  # We want complete response, not streaming
+                "options": {
+                    "temperature": 0.7,
+                    "num_predict": 1000,  # Max tokens to generate
+                }
             }
 
-            use_function_calling = False
-            response_data: Optional[Dict] = None
+            # Make API call to Ollama's native /api/chat endpoint
+            resp = self.client.post("/api/chat", json=payload)
+            resp.raise_for_status()
+            response_data = resp.json()
 
-            # Try function-calling mode first
-            try:
-                fc_payload = {**payload, "tools": FUNCTION_TOOLS, "tool_choice": "auto"}
-                resp = self.client.post("/chat/completions", json=fc_payload)
-                resp.raise_for_status()
-                response_data = resp.json()
-                use_function_calling = True
-                logger.info("Using function calling mode")
-            except httpx.HTTPStatusError as exc:
-                if exc.response.status_code in (400, 404):
-                    logger.info("Function calling not supported, retrying without tools")
-                else:
-                    raise
+            # Ollama native response format: {"message": {"role": "assistant", "content": "..."}}
+            if "message" not in response_data:
+                raise ValueError("Invalid response format from Ollama")
 
-            # Fallback to standard JSON mode if needed
-            if response_data is None:
-                resp = self.client.post("/chat/completions", json=payload)
-                resp.raise_for_status()
-                response_data = resp.json()
-                use_function_calling = False
-
-            # Parse response
-            choices = response_data.get("choices", [])
-            if not choices:
-                raise ValueError("No choices returned from Ollama")
-
-            response_message = choices[0].get("message", {})
+            response_message = response_data["message"]
+            response_text = response_message.get("content", "")
 
             # Add to conversation history
             self._add_to_history(user_id, "user", message)
 
-            # Parse based on response type
-            tool_calls = response_message.get("tool_calls") or []
+            # Parse response using JSON extraction from prompt-engineered response
+            try:
+                # Handle thinking tags (for reasoning models)
+                if "<think>" in response_text and "</think>" in response_text:
+                    # Extract content after </think>
+                    response_text = response_text.split("</think>")[-1].strip()
 
-            if use_function_calling and tool_calls:
-                # Function calling mode
-                tool_call = tool_calls[0]
-                function_args_raw = tool_call.get("function", {}).get("arguments", "{}")
-                function_args = json.loads(function_args_raw)
-                result = self._validate_function_response(function_args)
-            else:
-                # JSON mode - parse content as JSON
-                try:
-                    response_text = response_message.get("content") or "{}"
+                # Find JSON object in the response (handle case where there's extra text)
+                start_idx = response_text.find("{")
+                end_idx = response_text.rfind("}") + 1
 
-                    # DeepSeek R1 models may include <think> tags, extract JSON from content
-                    # Remove think tags if present
-                    if "<think>" in response_text and "</think>" in response_text:
-                        # Extract content after </think>
-                        response_text = response_text.split("</think>")[-1].strip()
-
-                    # Find JSON object in the response (handle case where there's extra text)
-                    start_idx = response_text.find("{")
-                    end_idx = response_text.rfind("}") + 1
-
-                    if start_idx != -1 and end_idx > start_idx:
-                        json_str = response_text[start_idx:end_idx]
-                        function_args = json.loads(json_str)
-                        result = self._validate_function_response(function_args)
-                    else:
-                        # No JSON found, treat as casual chat
-                        result = {
-                            "intent": "casual_chat",
-                            "response_text": response_text
-                        }
-
-                except json.JSONDecodeError as e:
-                    logger.warning(f"JSON parsing failed: {e}, content: {response_text[:200]}")
-                    # Fallback if JSON parsing fails
+                if start_idx != -1 and end_idx > start_idx:
+                    json_str = response_text[start_idx:end_idx]
+                    function_args = json.loads(json_str)
+                    result = self._validate_function_response(function_args)
+                else:
+                    # No JSON found, treat as casual chat
+                    logger.warning(f"No JSON found in response, treating as casual chat")
                     result = {
                         "intent": "casual_chat",
-                        "response_text": response_message.content or "Maaf, saya kurang mengerti."
+                        "response_text": response_text
                     }
+
+            except json.JSONDecodeError as e:
+                logger.warning(f"JSON parsing failed: {e}, content: {response_text[:200]}")
+                # Fallback if JSON parsing fails
+                result = {
+                    "intent": "casual_chat",
+                    "response_text": response_text or "Maaf, saya kurang mengerti."
+                }
 
             # Add assistant response to history
             if "response_text" in result:
@@ -208,6 +177,13 @@ class LLMAgent:
             logger.info(f"Successfully processed message with intent: {result.get('intent')}")
             return result
 
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error from Ollama: {e.response.status_code} - {e.response.text}", exc_info=True)
+            return {
+                "intent": "error",
+                "response_text": ERROR_RESPONSES["api_error"],
+                "error": f"HTTP {e.response.status_code}: {e.response.text}"
+            }
         except Exception as e:
             logger.error(f"Error processing message: {e}", exc_info=True)
             return {

@@ -145,7 +145,18 @@ class FinancialDiscordBot(discord.Client):
                 for i, chunk in enumerate(chunks):
                     if i == 0:
                         if file_to_upload:
-                            await message.reply(chunk, file=discord.File(file_to_upload))
+                            # Open file properly for upload
+                            try:
+                                if not os.path.exists(file_to_upload):
+                                    raise FileNotFoundError(f"File not found: {file_to_upload}")
+
+                                with open(file_to_upload, 'rb') as f:
+                                    filename = os.path.basename(file_to_upload)
+                                    discord_file = discord.File(f, filename=filename)
+                                    await message.reply(chunk, file=discord_file)
+                            except Exception as e:
+                                logger.error(f"Failed to upload file in chunked message: {e}", exc_info=True)
+                                await message.reply(chunk + f"\n\n⚠️ File upload failed: {str(e)}")
                         else:
                             await message.reply(chunk)
                     else:
@@ -155,7 +166,20 @@ class FinancialDiscordBot(discord.Client):
                 if file_to_upload:
                     logger.info(f"Attempting to upload file: {file_to_upload}")
                     try:
-                        await message.reply(response, file=discord.File(file_to_upload))
+                        # Verify file exists and is readable
+                        if not os.path.exists(file_to_upload):
+                            raise FileNotFoundError(f"File not found: {file_to_upload}")
+
+                        file_size = os.path.getsize(file_to_upload)
+                        logger.info(f"File size: {file_size} bytes")
+
+                        # Open file in binary mode and create Discord file object
+                        with open(file_to_upload, 'rb') as f:
+                            # Extract filename from path
+                            filename = os.path.basename(file_to_upload)
+                            discord_file = discord.File(f, filename=filename)
+                            await message.reply(response, file=discord_file)
+
                         logger.info("File uploaded successfully!")
                     except Exception as e:
                         logger.error(f"Failed to upload file: {e}", exc_info=True)

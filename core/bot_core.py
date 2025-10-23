@@ -175,8 +175,39 @@ class FinancialBotCore:
         if success:
             # Dapatkan saldo terbaru
             balance_data = self.db.get_user_balance(user_id)
+
+            # Creative response based on amount and category
+            celebration = ""
+            if amount >= 10_000_000:
+                celebration = "🎉 Wah luar biasa! Pemasukan segede ini jarang-jarang! "
+            elif amount >= 5_000_000:
+                celebration = "🎊 Mantap banget! Rejeki lancar nih! "
+            elif amount >= 1_000_000:
+                celebration = "✨ Alhamdulillah, rezeki yang cukup besar! "
+            else:
+                celebration = "👍 Bagus! Setiap pemasukan itu berarti! "
+
+            # Category-specific encouragement
+            if category == "Gaji":
+                celebration += "Gaji udah masuk, jangan lupa sisihkan buat tabungan ya! 💪"
+            elif category == "Freelance":
+                celebration += "Keren, hasil kerja keras kamu! Keep hustling! 🚀"
+            elif category == "Investasi":
+                celebration += "Smart move! Uang kamu bekerja untuk kamu! 📈"
+            elif category == "Hadiah":
+                celebration += "Lucky you! Semoga makin banyak rezeki nomplok! 🎁"
+            else:
+                celebration += "Terus tingkatkan pemasukan kamu! 💪"
+
             balance_info = f"\n\n💰 Saldo kamu sekarang: Rp {balance_data['balance']:,.0f}"
-            return base_response + balance_info
+
+            # Add extra motivation if balance is good
+            if balance_data['balance'] >= 10_000_000:
+                balance_info += "\n🌟 Saldo kamu udah sehat banget! Pertahankan ya!"
+            elif balance_data['balance'] >= 5_000_000:
+                balance_info += "\n💪 Saldo kamu cukup bagus nih! Keep it up!"
+
+            return celebration + balance_info
         else:
             return "Maaf, gagal menyimpan data pemasukan. Coba lagi ya! 🔧"
 
@@ -205,16 +236,47 @@ class FinancialBotCore:
             balance_data = self.db.get_user_balance(user_id)
             balance = balance_data['balance']
 
+            # Creative response based on category and amount
+            acknowledgment = ""
+            if category == "Makanan":
+                if amount >= 100_000:
+                    acknowledgment = "🍽️ Wah makan enak nih! Semoga kenyang dan worth it ya! "
+                else:
+                    acknowledgment = "🍽️ Dicatat! Jangan lupa makan bergizi ya! "
+            elif category == "Transport":
+                acknowledgment = "🚗 Oke, biaya transportasi sudah dicatat! Stay safe on the road! "
+            elif category == "Hiburan":
+                if amount >= 500_000:
+                    acknowledgment = "🎬 Wih, hiburan mahal nih! Semoga seru dan happy ya! "
+                else:
+                    acknowledgment = "🎬 Have fun! Me time itu penting kok! "
+            elif category == "Belanja":
+                if amount >= 1_000_000:
+                    acknowledgment = "🛍️ Belanja besar nih! Belanja kebutuhan atau keinginan nih? 🤔 "
+                else:
+                    acknowledgment = "🛍️ Oke, belanja sudah dicatat! Belanja smart ya! "
+            elif category == "Tagihan":
+                acknowledgment = "📝 Good job! Bayar tagihan tepat waktu itu penting! "
+            elif category == "Kesehatan":
+                acknowledgment = "🏥 Kesehatan nomor satu! Investasi yang tepat! "
+            elif category == "Pendidikan":
+                acknowledgment = "📚 Keren! Investasi ke diri sendiri itu yang terbaik! "
+            else:
+                acknowledgment = "✅ Oke, pengeluaran sudah dicatat! "
+
             balance_info = f"\n\n💰 Saldo kamu sekarang: Rp {balance:,.0f}"
 
             # Warning jika saldo negatif
             if balance < 0:
-                balance_info += "\n⚠️ Perhatian: Saldo kamu sudah negatif! Hati-hati ya!"
+                balance_info += "\n⚠️ Perhatian: Saldo kamu sudah negatif! Waktunya hustle cari pemasukan tambahan! 💪"
             # Warning jika pengeluaran > 80% dari pemasukan
             elif balance_data['income'] > 0 and balance_data['expense'] / balance_data['income'] > 0.8:
-                balance_info += "\n⚠️ Pengeluaran kamu sudah lebih dari 80% pemasukan. Mulai hemat ya!"
+                balance_info += "\n⚠️ Pengeluaran kamu sudah lebih dari 80% pemasukan. Mulai hemat atau cari pemasukan tambahan ya! 🎯"
+            # Positive reinforcement jika spending masih sehat
+            elif balance_data['income'] > 0 and balance_data['expense'] / balance_data['income'] < 0.5:
+                balance_info += "\n✨ Bagus! Pengeluaran kamu masih terkontrol kok! Keep it up! 👍"
 
-            return base_response + balance_info
+            return acknowledgment + balance_info
         else:
             return "Maaf, gagal menyimpan data pengeluaran. Coba lagi ya! 🔧"
 
@@ -222,24 +284,50 @@ class FinancialBotCore:
         """Handle pengecekan saldo"""
         balance_data = self.db.get_user_balance(user_id)
 
-        response = f"""📊 **Ringkasan Keuangan Kamu**
+        # Creative opening based on balance
+        if balance_data['balance'] >= 10_000_000:
+            opening = "🌟 Wah, kondisi finansial kamu sehat banget! Cek deh:\n\n"
+        elif balance_data['balance'] >= 1_000_000:
+            opening = "💪 Lumayan nih, keep going! Ini ringkasan keuangan kamu:\n\n"
+        elif balance_data['balance'] > 0:
+            opening = "👍 Oke, masih ada saldo! Ini ringkasannya:\n\n"
+        elif balance_data['balance'] == 0:
+            opening = "😅 Hmm, lagi tipis nih. Cek dulu ya:\n\n"
+        else:
+            opening = "⚠️ Uh-oh, perlu perhatian nih! Cek kondisinya:\n\n"
+
+        response = opening + f"""📊 **Ringkasan Keuangan Kamu**
 
 💵 Total Pemasukan: Rp {balance_data['income']:,.0f}
 💸 Total Pengeluaran: Rp {balance_data['expense']:,.0f}
 💰 Saldo Saat Ini: Rp {balance_data['balance']:,.0f}
 """
 
-        # Tambahkan insight
+        # Tambahkan insight yang lebih kreatif
         if balance_data['balance'] < 0:
-            response += "\n⚠️ Saldo kamu negatif! Sebaiknya kurangi pengeluaran ya."
+            response += "\n⚠️ **Alert!** Saldo kamu negatif! Saatnya action:\n"
+            response += "   • Kurangi pengeluaran non-esensial\n"
+            response += "   • Cari side hustle atau pemasukan tambahan\n"
+            response += "   • Review semua subscription yang tidak perlu"
         elif balance_data['balance'] == 0:
-            response += "\n💡 Saldo kamu pas-pasan nih. Mulai nabung yuk!"
+            response += "\n💡 Saldo kamu pas-pasan nih! Tips:\n"
+            response += "   • Mulai sisihkan minimal 10% dari pemasukan\n"
+            response += "   • Buat pos-pos pengeluaran yang jelas\n"
+            response += "   • Cari peluang pemasukan tambahan"
         else:
             savings_percentage = (balance_data['balance'] / balance_data['income'] * 100) if balance_data['income'] > 0 else 0
-            if savings_percentage >= 20:
-                response += f"\n✨ Keren! Kamu sudah menyisihkan {savings_percentage:.0f}% dari pemasukan!"
+            if savings_percentage >= 30:
+                response += f"\n🏆 **Outstanding!** Kamu udah sisihkan {savings_percentage:.0f}% dari pemasukan!\n"
+                response += "   Ini jauh di atas standar 20%. Financial goal on point! 🎯"
+            elif savings_percentage >= 20:
+                response += f"\n✨ **Great job!** Kamu udah sisihkan {savings_percentage:.0f}% dari pemasukan!\n"
+                response += "   Target 20% tercapai! Coba tingkatkan jadi 30% kalau bisa ya! 💪"
+            elif savings_percentage >= 10:
+                response += f"\n👍 Lumayan! Kamu udah sisihkan {savings_percentage:.0f}% dari pemasukan.\n"
+                response += "   Coba tingkatkan jadi minimal 20% buat masa depan yang lebih secure ya!"
             else:
-                response += "\n💡 Coba sisihkan minimal 20% dari pemasukan untuk tabungan ya!"
+                response += f"\n💡 Saldo kamu {savings_percentage:.0f}% dari pemasukan. Target ideal: minimal 20%!\n"
+                response += "   Tips: Pakai metode 50/30/20 (50% kebutuhan, 30% keinginan, 20% tabungan)"
 
         return response
 
@@ -280,31 +368,49 @@ class FinancialBotCore:
         """Handle permintaan saran anggaran (dikombinasikan dengan LLM response)"""
         base_response = result.get("response_text", "")
 
-        # Tambahkan analisis konkret
-        advice = "\n\n💡 **Saran Anggaran:**\n"
+        # Tambahkan analisis konkret dengan opening yang engaging
+        advice = "\n\n💡 **Saran Anggaran dari FinancialBot:**\n"
 
         if balance_data['balance'] <= 0:
-            advice += "- 🚨 Prioritas: Kurangi pengeluaran segera!\n"
-            advice += "- Cek kategori pengeluaran terbesar dan cari cara menguranginya\n"
+            advice += "\n🚨 **Mode Darurat - Immediate Action Required!**\n"
+            advice += "• Prioritas #1: STOP pengeluaran non-esensial sekarang!\n"
+            advice += "• Review semua subscription dan batalkan yang tidak perlu\n"
+            advice += "• Cari pemasukan tambahan (freelance, jual barang tidak terpakai)\n"
+            advice += "• Fokus bayar tagihan penting dulu (listrik, internet, dll)\n"
         else:
-            # Dana darurat (15% dari saldo)
-            emergency_fund = balance_data['balance'] * 0.15
-            advice += f"- Dana Darurat (15%): Sisihkan Rp {emergency_fund:,.0f}\n"
+            advice += "\n📊 **Rekomendasi Alokasi Saldo (Metode 50/30/20 modified):**\n"
 
-            # Tabungan (30% dari sisa)
-            remaining = balance_data['balance'] - emergency_fund
-            savings = remaining * 0.30
-            advice += f"- Tabungan (30%): Sisihkan Rp {savings:,.0f}\n"
+            # Dana darurat (20% dari saldo)
+            emergency_fund = balance_data['balance'] * 0.20
+            advice += f"\n🏥 Dana Darurat (20%): Rp {emergency_fund:,.0f}"
+            advice += f"\n   → Simpan di tempat aman, jangan dipakai kecuali darurat!"
 
-            # Sisanya untuk kebutuhan
-            for_expenses = remaining - savings
-            advice += f"- Untuk kebutuhan: Rp {for_expenses:,.0f}\n"
+            # Tabungan/Investasi (30% dari saldo)
+            savings = balance_data['balance'] * 0.30
+            advice += f"\n\n💎 Tabungan/Investasi (30%): Rp {savings:,.0f}"
+            advice += f"\n   → Untuk tujuan jangka panjang (DP rumah, pensiun, dll)"
 
-        # Cek spending ratio
+            # Budget harian/kebutuhan (50% dari saldo)
+            for_expenses = balance_data['balance'] * 0.50
+            advice += f"\n\n🛒 Budget Kebutuhan (50%): Rp {for_expenses:,.0f}"
+            advice += f"\n   → Makan, transport, tagihan, kebutuhan sehari-hari"
+
+        # Cek spending ratio dengan message yang lebih engaging
         if balance_data['income'] > 0:
             spending_ratio = balance_data['expense'] / balance_data['income']
-            if spending_ratio > 0.8:
-                advice += "\n⚠️ Pengeluaran kamu sudah {:.0f}% dari pemasukan! Target ideal: max 70%".format(spending_ratio * 100)
+            advice += f"\n\n📈 **Analisis Spending Ratio:**"
+            if spending_ratio > 0.9:
+                advice += f"\n🔴 Kritis! {spending_ratio*100:.0f}% dari pemasukan habis!"
+                advice += f"\n   Target sehat: max 70%. Kurangi {(spending_ratio-0.7)*balance_data['income']:,.0f} per bulan!"
+            elif spending_ratio > 0.8:
+                advice += f"\n🟠 Warning! {spending_ratio*100:.0f}% dari pemasukan habis!"
+                advice += f"\n   Hampir batas aman. Coba kurangi pengeluaran atau tambah pemasukan."
+            elif spending_ratio > 0.7:
+                advice += f"\n🟡 {spending_ratio*100:.0f}% dari pemasukan terpakai."
+                advice += f"\n   Masih oke, tapi jangan sampai naik ya!"
+            else:
+                advice += f"\n🟢 Sehat! {spending_ratio*100:.0f}% dari pemasukan terpakai."
+                advice += f"\n   Perfect! Keep maintaining this ratio! 💪"
 
         return base_response + advice
 

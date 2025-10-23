@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 FinancialBot is an LLM-powered financial assistant that uses natural language processing to help users manage their personal finances in Indonesian language. It features conversation memory, multi-user support, and AI-driven financial advice.
 
-The bot operates through Discord integration or CLI mode for testing, using OpenRouter API to access various LLMs (Claude, GPT, Llama) with function calling capabilities for intent extraction.
+The bot operates through Discord integration or CLI mode for testing, using Ollama's native API to run local LLMs (default: llama3.1:8b) with prompt engineering for intent extraction via JSON responses.
 
 ## Architecture
 
@@ -14,19 +14,26 @@ Four-layer architecture with MCP integration:
 1. **Interface Layer**: Discord bot (`bot.py`) or CLI runner (`cli_runner.py`)
 2. **Core Layer**: Orchestration logic (`core/bot_core.py`) - routes intents to handlers
 3. **Service Layer**:
-   - `core/llm_agent.py` - OpenRouter API integration with conversation memory
+   - `core/llm_agent.py` - Ollama native API integration with conversation memory
    - `core/database.py` - SQLite data persistence
-   - `core/prompts.py` - System prompts and function calling schemas
+   - `core/prompts.py` - System prompts and JSON response schemas
    - `core/mcp_manager.py` - **NEW: Model Context Protocol manager for enhanced capabilities**
 4. **MCP Tools Layer**: File system, web search, analytics, and calendar integrations
 
-Key flow: User message → LLM Agent (intent extraction via function calling or JSON parsing) → Bot Core (intent routing) → Database/MCP operations → Response generation
+Key flow: User message → LLM Agent (intent extraction via JSON parsing from prompt-engineered responses) → Bot Core (intent routing) → Database/MCP operations → Response generation
 
 ## Development Commands
 
 ### Running the Bot
 
 ```bash
+# First, start Ollama server (in a separate terminal)
+ollama serve
+
+# Pull the model if you haven't already
+ollama pull llama3.1:8b
+
+# Then run the bot:
 # Discord mode (requires DISCORD_TOKEN)
 python bot.py
 
@@ -55,14 +62,17 @@ python -m pytest tests/ -v --cov=core
 # Install dependencies
 pip install -r requirements.txt
 
+# Install Ollama (if not already installed)
+# Visit: https://ollama.ai/download
+
 # Copy environment template
 cp .env.example .env
-# Then edit .env with your API keys
+# Then edit .env if you need to change Ollama settings (usually defaults work fine)
 ```
 
 ## Intent System
 
-The bot uses a function-calling or JSON-based intent classification system. All intents are defined in `core/prompts.py`:
+The bot uses a prompt engineering-based intent classification system that extracts structured JSON responses from the LLM. All intents are defined in `core/prompts.py`:
 
 **Core Financial Intents:**
 - `record_income` - Extract amount, category, description
@@ -89,18 +99,37 @@ Intent handlers are in `core/bot_core.py` with naming convention `_handle_{inten
 
 ## LLM Integration Details
 
-The `LLMAgent` class (core/llm_agent.py) handles two response modes:
+The `LLMAgent` class (core/llm_agent.py) uses Ollama's native API (`/api/chat`) with prompt engineering:
 
-1. **Function Calling Mode**: For models that support tool use (Claude, GPT-4, etc.)
-   - Uses `FUNCTION_TOOLS` schema from prompts.py
-   - Automatically extracts structured data
+**How it works:**
+1. **Native Ollama API**: Connects to local Ollama server at `http://localhost:11434/api/chat`
+2. **Prompt Engineering**: System prompt instructs the model to return structured JSON responses
+3. **JSON Parsing**: Extracts JSON from model output between first `{` and last `}`
+4. **Thinking Tags Support**: Handles reasoning models that use `<think>` tags by extracting content after `</think>`
+5. **Graceful Fallback**: If JSON parsing fails, treats response as casual chat
 
-2. **JSON Parsing Mode**: Fallback for models without tool support
-   - Parses JSON from response content
-   - Handles DeepSeek R1 `<think>` tags by extracting content after `</think>`
-   - Extracts JSON between first `{` and last `}`
+**Key Features:**
+- No API key required (local Ollama server)
+- Works just like running `ollama run llama3.1:8b` but with structured output
+- Full LLM capabilities preserved through prompt engineering
+- Conversation history maintained per user (last 5 exchanges) for contextual understanding
 
-The agent maintains conversation history per user (last 5 exchanges) for contextual understanding.
+**API Call Flow:**
+```python
+# Request to /api/chat
+{
+  "model": "llama3.1:8b",
+  "messages": [...],
+  "stream": False,
+  "options": {"temperature": 0.7, "num_predict": 1000}
+}
+
+# Response from Ollama
+{
+  "message": {"role": "assistant", "content": "{\"intent\": \"...\", ...}"},
+  "done": True
+}
+```
 
 ## Database Schema
 
@@ -124,9 +153,20 @@ Expense categories: Makanan, Transport, Hiburan, Belanja, Tagihan, Kesehatan, Pe
 4. Update system prompt documentation if needed
 
 ### Model Compatibility
-- Free models: `meta-llama/llama-3.1-8b-instruct:free`, `tngtech/deepseek-r1t2-chimera:free`
-- Paid models with function calling: `anthropic/claude-3-haiku`, `openai/gpt-3.5-turbo`
-- Change model via `OPENROUTER_MODEL` in `.env`
+The bot uses Ollama's native API and works with any model you have pulled locally:
+
+**Recommended models:**
+- `llama3.1:8b` (default) - Fast, good balance of performance and speed
+- `llama3.1:70b` - Better quality, requires more VRAM
+- `mistral:7b` - Fast alternative
+- `gemma2:9b` - Good for code understanding
+
+**Changing models:**
+1. Pull the model: `ollama pull model_name`
+2. Update `OLLAMA_MODEL` in `.env`
+3. Restart the bot
+
+**Note:** All models work via prompt engineering - no function calling required!
 
 ### Conversation Memory
 - Each user has isolated conversation history in `LLMAgent.conversation_history`
@@ -141,7 +181,7 @@ Expense categories: Makanan, Transport, Hiburan, Belanja, Tagihan, Kesehatan, Pe
 ## Common Development Patterns
 
 ### Testing with Mocks
-Tests use `unittest.mock` to mock OpenAI client responses. See `tests/test_llm_agent.py` for patterns on mocking function calling responses.
+Tests use `unittest.mock` to mock httpx responses from Ollama. See `tests/test_llm_agent.py` for patterns on mocking Ollama API responses.
 
 ### Error Handling
 - LLM errors return intent "error" with predefined messages from `ERROR_RESPONSES`
@@ -186,14 +226,18 @@ The bot uses MCP to provide enhanced capabilities beyond basic LLM chat:
 
 ## Environment Variables
 
-Required:
-- `OPENROUTER_API_KEY` - OpenRouter API key
+**Required:**
 - `DISCORD_TOKEN` - Discord bot token (only for Discord mode)
 
-Optional:
-- `OPENROUTER_MODEL` - Model selection (default: anthropic/claude-3-haiku)
+**Ollama Configuration (Optional - defaults usually work):**
+- `OLLAMA_BASE_URL` - Ollama server URL (default: http://localhost:11434)
+- `OLLAMA_MODEL` - Model to use (default: llama3.1:8b)
+
+**Optional:**
 - `DATABASE_PATH` - SQLite database path (default: financial_bot.db)
 - `LOG_LEVEL` - Logging verbosity (default: INFO)
 - `LOG_FILE` - Log file path (default: logs/bot.log)
 - `MCP_EXPORT_DIR` - Directory for exported files (default: exports)
 - `MCP_REMINDERS_FILE` - JSON file for reminders (default: reminders.json)
+
+**Note:** No API keys needed! Everything runs locally via Ollama.
