@@ -10,15 +10,17 @@ The bot operates through Discord integration or CLI mode for testing, using Open
 
 ## Architecture
 
-Three-layer architecture:
+Four-layer architecture with MCP integration:
 1. **Interface Layer**: Discord bot (`bot.py`) or CLI runner (`cli_runner.py`)
 2. **Core Layer**: Orchestration logic (`core/bot_core.py`) - routes intents to handlers
 3. **Service Layer**:
    - `core/llm_agent.py` - OpenRouter API integration with conversation memory
    - `core/database.py` - SQLite data persistence
    - `core/prompts.py` - System prompts and function calling schemas
+   - `core/mcp_manager.py` - **NEW: Model Context Protocol manager for enhanced capabilities**
+4. **MCP Tools Layer**: File system, web search, analytics, and calendar integrations
 
-Key flow: User message → LLM Agent (intent extraction via function calling or JSON parsing) → Bot Core (intent routing) → Database operations → Response generation
+Key flow: User message → LLM Agent (intent extraction via function calling or JSON parsing) → Bot Core (intent routing) → Database/MCP operations → Response generation
 
 ## Development Commands
 
@@ -62,13 +64,24 @@ cp .env.example .env
 
 The bot uses a function-calling or JSON-based intent classification system. All intents are defined in `core/prompts.py`:
 
+**Core Financial Intents:**
 - `record_income` - Extract amount, category, description
 - `record_expense` - Extract amount, category, description
 - `check_balance` - Retrieve user balance summary
 - `get_report` - Generate detailed financial report
 - `budget_advice` - Provide AI-driven budgeting suggestions
-- `purchase_analysis` - Analyze affordability of item (requires amount, item_name)
+- `purchase_analysis` - Analyze affordability of item (with optional web price lookup)
 - `delete_transaction` - Remove transaction by ID
+
+**MCP-Enhanced Intents (NEW):**
+- `export_report` - Export financial data to CSV/Excel (requires format: "csv" or "excel")
+- `search_price` - Search current market prices online (requires item_name)
+- `analyze_trends` - Advanced spending trend analysis with pandas
+- `set_reminder` - Create bill/budget reminders (requires reminder_text, due_date)
+- `view_reminders` - List all active reminders
+- `complete_reminder` - Mark reminder as done (requires reminder_id)
+
+**Other:**
 - `casual_chat` - Handle conversational queries
 - `help` - Display bot capabilities
 
@@ -138,6 +151,39 @@ Tests use `unittest.mock` to mock OpenAI client responses. See `tests/test_llm_a
 ### Adding New Categories
 Categories are pre-populated in `database.py` init. To add: insert into categories table or modify `default_categories` list and recreate database.
 
+## MCP Integration (Model Context Protocol)
+
+The bot uses MCP to provide enhanced capabilities beyond basic LLM chat:
+
+**1. File System Server** (`mcp_manager.py:export_to_csv/excel`):
+- Exports transaction history to CSV or Excel
+- Excel exports include 3 sheets: Transactions, Summary, Categories
+- Files saved to `exports/` directory
+
+**2. Web Search Server** (`mcp_manager.py:search_price`):
+- Simulated price lookup for common items (laptop, iPhone, PS5, etc.)
+- Returns price ranges (min, max, avg) for purchase analysis
+- Auto-integrated with `purchase_analysis` intent when price not specified
+
+**3. Database Tools Server** (`mcp_manager.py:analyze_spending_trends`):
+- Uses pandas for advanced analytics
+- Monthly spending trends
+- Top 5 category breakdown with percentages
+- Spending pattern insights
+
+**4. Calendar/Reminder Server** (`mcp_manager.py:add_reminder/get_reminders`):
+- JSON-based reminder storage per user
+- Supports full date (YYYY-MM-DD) or day-only (DD) format
+- Reminder categories and completion tracking
+- Auto-calculates next month for past dates
+
+### Adding New MCP Tools
+1. Add method to `MCPManager` class in `core/mcp_manager.py`
+2. Add new intent to `FUNCTION_TOOLS` in `core/prompts.py`
+3. Create handler in `core/bot_core.py` (e.g., `_handle_new_tool()`)
+4. Add routing case in `process_message()` method
+5. Write tests in `tests/test_mcp_manager.py`
+
 ## Environment Variables
 
 Required:
@@ -149,3 +195,5 @@ Optional:
 - `DATABASE_PATH` - SQLite database path (default: financial_bot.db)
 - `LOG_LEVEL` - Logging verbosity (default: INFO)
 - `LOG_FILE` - Log file path (default: logs/bot.log)
+- `MCP_EXPORT_DIR` - Directory for exported files (default: exports)
+- `MCP_REMINDERS_FILE` - JSON file for reminders (default: reminders.json)

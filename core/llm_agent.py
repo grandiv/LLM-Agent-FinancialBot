@@ -239,6 +239,19 @@ class LLMAgent:
         if "transaction_id" in function_args and function_args["transaction_id"]:
             result["transaction_id"] = int(function_args["transaction_id"])
 
+        # MCP-specific fields
+        if "format" in function_args and function_args["format"]:
+            result["format"] = function_args["format"]
+
+        if "reminder_text" in function_args and function_args["reminder_text"]:
+            result["reminder_text"] = function_args["reminder_text"]
+
+        if "due_date" in function_args and function_args["due_date"]:
+            result["due_date"] = function_args["due_date"]
+
+        if "reminder_id" in function_args and function_args["reminder_id"]:
+            result["reminder_id"] = int(function_args["reminder_id"])
+
         return result
 
     def clear_history(self, user_id: str):

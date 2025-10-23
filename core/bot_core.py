@@ -3,27 +3,32 @@ Core logic bot yang menghubungkan LLM Agent dengan Database
 """
 
 import logging
+import asyncio
 from typing import Dict, Optional
 from .llm_agent import LLMAgent
 from .database import DatabaseManager
+from .mcp_manager import MCPManager
 
 logger = logging.getLogger(__name__)
 
 class FinancialBotCore:
     """Core bot yang menghandle semua logic bisnis"""
 
-    def __init__(self, llm_agent: LLMAgent, database: DatabaseManager):
+    def __init__(self, llm_agent: LLMAgent, database: DatabaseManager,
+                 mcp_manager: Optional[MCPManager] = None):
         """
         Initialize bot core
 
         Args:
             llm_agent: Instance dari LLMAgent
             database: Instance dari DatabaseManager
+            mcp_manager: Instance dari MCPManager (opsional)
         """
         self.llm = llm_agent
         self.db = database
+        self.mcp = mcp_manager or MCPManager()
 
-    def process_message(self, user_id: str, username: str, message: str) -> str:
+    def process_message(self, user_id: str, username: str, message: str):
         """
         Proses pesan dari user dan return response
 
@@ -33,21 +38,56 @@ class FinancialBotCore:
             message: Pesan dari user
 
         Returns:
-            String response untuk dikirim ke user
+            String response atau Dict dengan 'message' dan 'file_path' untuk file upload
         """
         try:
             # Dapatkan data keuangan user untuk context
             balance_data = self.db.get_user_balance(user_id)
             recent_transactions = self.db.get_user_transactions(user_id, limit=3)
 
-            # Proses dengan LLM
-            result = self.llm.process_message(
-                user_id=user_id,
-                username=username,
-                message=message,
-                balance_data=balance_data,
-                recent_transactions=recent_transactions
-            )
+            # Pre-process message for better intent detection
+            message_lower = message.lower()
+
+            # Quick keyword-based intent override for export (LLM struggles with Indonesian "ekspor")
+            if any(keyword in message_lower for keyword in ["ekspor", "export", "unduh laporan", "download laporan"]):
+                if "excel" in message_lower or "xlsx" in message_lower:
+                    # Force export_report intent with excel format
+                    result = {
+                        "intent": "export_report",
+                        "format": "excel",
+                        "response_text": "Baik, saya akan ekspor laporan keuangan kamu ke format Excel..."
+                    }
+                elif "csv" in message_lower:
+                    result = {
+                        "intent": "export_report",
+                        "format": "csv",
+                        "response_text": "Baik, saya akan ekspor laporan keuangan kamu ke format CSV..."
+                    }
+                elif "laporan" in message_lower:
+                    # Default to Excel if format not specified
+                    result = {
+                        "intent": "export_report",
+                        "format": "excel",
+                        "response_text": "Baik, saya akan ekspor laporan keuangan kamu ke format Excel..."
+                    }
+                else:
+                    # Let LLM handle it
+                    result = self.llm.process_message(
+                        user_id=user_id,
+                        username=username,
+                        message=message,
+                        balance_data=balance_data,
+                        recent_transactions=recent_transactions
+                    )
+            else:
+                # Proses dengan LLM
+                result = self.llm.process_message(
+                    user_id=user_id,
+                    username=username,
+                    message=message,
+                    balance_data=balance_data,
+                    recent_transactions=recent_transactions
+                )
 
             intent = result.get("intent")
             logger.info(f"Processing intent: {intent} for user {user_id}")
@@ -74,17 +114,39 @@ class FinancialBotCore:
             elif intent == "delete_transaction":
                 return self._handle_delete_transaction(user_id, result)
 
+            # MCP-enabled intents
+            elif intent == "export_report":
+                return self._handle_export_report(user_id, result)
+
+            elif intent == "search_price":
+                return self._handle_search_price(result)
+
+            elif intent == "analyze_trends":
+                return self._handle_analyze_trends(user_id, result)
+
+            elif intent == "set_reminder":
+                return self._handle_set_reminder(user_id, result)
+
+            elif intent == "view_reminders":
+                return self._handle_view_reminders(user_id, result)
+
+            elif intent == "complete_reminder":
+                return self._handle_complete_reminder(user_id, result)
+
             elif intent == "help":
                 return self._handle_help(result)
 
             elif intent == "casual_chat":
-                return result.get("response_text", "Halo! Ada yang bisa saya bantu?")
+                response = result.get("response_text", "").strip()
+                return response if response else "Halo! Ada yang bisa saya bantu? 😊"
 
             elif intent == "error":
-                return result.get("response_text", "Maaf, ada kesalahan sistem. Coba lagi ya!")
+                response = result.get("response_text", "").strip()
+                return response if response else "Maaf, ada kesalahan sistem. Coba lagi ya!"
 
             else:
-                return result.get("response_text", "Maaf, saya kurang mengerti. Bisa dijelaskan lagi? 🤔")
+                response = result.get("response_text", "").strip()
+                return response if response else "Maaf, saya kurang mengerti. Bisa dijelaskan lagi? 🤔"
 
         except Exception as e:
             logger.error(f"Error in process_message: {e}", exc_info=True)
@@ -252,8 +314,31 @@ class FinancialBotCore:
         price = result.get("amount", 0)
         base_response = result.get("response_text", "")
 
+        # If price not specified, try to search online
         if price <= 0:
-            return "Maaf, harga barang harus disebutkan ya! Coba lagi dengan format yang lebih jelas. 💰"
+            logger.info(f"Price not specified, searching online for {item_name}")
+            try:
+                # Try to get existing loop
+                try:
+                    loop = asyncio.get_running_loop()
+                    # If we're already in an async context, create a task
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(asyncio.run, self.mcp.search_price(item_name))
+                        search_result = future.result()
+                except RuntimeError:
+                    # No running loop, safe to use asyncio.run
+                    search_result = asyncio.run(self.mcp.search_price(item_name))
+            except Exception as e:
+                logger.error(f"Error in price search: {e}", exc_info=True)
+                return "Maaf, harga barang harus disebutkan ya! Coba lagi dengan format yang lebih jelas. 💰"
+
+            if search_result["success"]:
+                price = search_result["price_range"]["avg"]
+                base_response = f"Saya cari harga {item_name} online dulu ya...\n\n" + search_result["message"] + "\n\n"
+                base_response += f"Saya akan analisis berdasarkan harga rata-rata: Rp {price:,.0f}\n"
+            else:
+                return "Maaf, harga barang harus disebutkan ya! Coba lagi dengan format yang lebih jelas. 💰"
 
         analysis = f"\n\n🛍️ **Analisis Pembelian {item_name}:**\n"
         analysis += f"Harga: Rp {price:,.0f}\n"
@@ -334,3 +419,115 @@ Aku bisa bantu kamu:
 
 Ngobrol aja dengan natural, aku akan mengerti! 😊
 """
+
+    # ============================================================================
+    # MCP HANDLERS
+    # ============================================================================
+
+    def _handle_export_report(self, user_id: str, result: Dict) -> Dict:
+        """Handle ekspor laporan ke file
+
+        Returns:
+            Dict with 'message' and optionally 'file_path' for Discord upload
+        """
+        export_format = result.get("format", "csv").lower()
+        base_response = result.get("response_text", "")
+
+        # Dapatkan data yang diperlukan
+        transactions = self.db.get_user_transactions(user_id, limit=1000)
+        balance_data = self.db.get_user_balance(user_id)
+
+        if export_format == "excel":
+            category_report = self.db.get_category_report(user_id)
+            mcp_result = self.mcp.export_to_excel(user_id, transactions, balance_data, category_report)
+        else:
+            mcp_result = self.mcp.export_to_csv(user_id, transactions, balance_data)
+
+        if mcp_result["success"]:
+            message = base_response + "\n\n" + mcp_result["message"] if base_response else mcp_result["message"]
+            file_path = mcp_result.get("file_path")
+            logger.info(f"Export successful! File path: {file_path}")
+            return {
+                "message": message,
+                "file_path": file_path
+            }
+        else:
+            logger.warning(f"Export failed: {mcp_result['message']}")
+            return {"message": mcp_result["message"]}
+
+    def _handle_search_price(self, result: Dict) -> str:
+        """Handle pencarian harga barang online"""
+        item_name = result.get("item_name", "")
+        base_response = result.get("response_text", "")
+
+        if not item_name:
+            return "Maaf, sebutkan nama barang yang ingin dicari harganya ya! 🔍"
+
+        # Run async search - use asyncio.run to handle event loop properly
+        try:
+            # Try to get existing loop
+            try:
+                loop = asyncio.get_running_loop()
+                # If we're already in an async context, create a task
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, self.mcp.search_price(item_name))
+                    mcp_result = future.result()
+            except RuntimeError:
+                # No running loop, safe to use asyncio.run
+                mcp_result = asyncio.run(self.mcp.search_price(item_name))
+        except Exception as e:
+            logger.error(f"Error in search_price: {e}", exc_info=True)
+            return "Maaf, terjadi kesalahan saat mencari harga. Coba lagi ya! 🔍"
+
+        if mcp_result["success"]:
+            response = base_response + "\n\n" + mcp_result["message"] if base_response else mcp_result["message"]
+            return response
+        else:
+            return mcp_result["message"]
+
+    def _handle_analyze_trends(self, user_id: str, result: Dict) -> str:
+        """Handle analisis tren pengeluaran"""
+        base_response = result.get("response_text", "")
+
+        # Dapatkan semua transaksi untuk analisis
+        transactions = self.db.get_user_transactions(user_id, limit=1000)
+
+        mcp_result = self.mcp.analyze_spending_trends(transactions)
+
+        if mcp_result["success"]:
+            return base_response + "\n\n" + mcp_result["report"]
+        else:
+            return mcp_result["message"]
+
+    def _handle_set_reminder(self, user_id: str, result: Dict) -> str:
+        """Handle pembuatan reminder"""
+        reminder_text = result.get("reminder_text", "")
+        due_date = result.get("due_date", "")
+        category = result.get("category", "Tagihan")
+        base_response = result.get("response_text", "")
+
+        if not reminder_text or not due_date:
+            return "Maaf, sebutkan reminder dan tanggalnya ya! Contoh: 'ingatkan bayar listrik tanggal 5' 📅"
+
+        mcp_result = self.mcp.add_reminder(user_id, reminder_text, due_date, category)
+
+        if mcp_result["success"]:
+            return base_response + "\n\n" + mcp_result["message"]
+        else:
+            return mcp_result["message"]
+
+    def _handle_view_reminders(self, user_id: str, result: Dict) -> str:
+        """Handle tampilkan daftar reminder"""
+        mcp_result = self.mcp.get_reminders(user_id)
+        return mcp_result["message"]
+
+    def _handle_complete_reminder(self, user_id: str, result: Dict) -> str:
+        """Handle tandai reminder selesai"""
+        reminder_id = result.get("reminder_id")
+
+        if not reminder_id:
+            return "Maaf, sebutkan ID reminder yang ingin ditandai selesai ya! 🔢"
+
+        mcp_result = self.mcp.complete_reminder(user_id, reminder_id)
+        return mcp_result["message"]
