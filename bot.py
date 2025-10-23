@@ -117,6 +117,18 @@ class FinancialDiscordBot(discord.Client):
 
                 response = self.bot_core.process_message(user_id, username, content)
 
+            # Check if response includes file to upload
+            file_to_upload = None
+            if isinstance(response, dict):
+                file_to_upload = response.get("file_path")
+                response = response.get("message", "")
+                if file_to_upload:
+                    logger.info(f"File to upload detected: {file_to_upload}")
+                else:
+                    logger.warning("Response is dict but no file_path found!")
+            else:
+                logger.info(f"Response type: {type(response)}")
+
             # Split long messages (Discord limit: 2000 chars)
             if len(response) > 2000:
                 # Split by newlines first to avoid breaking sentences
@@ -134,11 +146,24 @@ class FinancialDiscordBot(discord.Client):
                 # Send chunks
                 for i, chunk in enumerate(chunks):
                     if i == 0:
-                        await message.reply(chunk)
+                        if file_to_upload:
+                            await message.reply(chunk, file=discord.File(file_to_upload))
+                        else:
+                            await message.reply(chunk)
                     else:
                         await message.channel.send(chunk)
             else:
-                await message.reply(response)
+                # Send response with optional file
+                if file_to_upload:
+                    logger.info(f"Attempting to upload file: {file_to_upload}")
+                    try:
+                        await message.reply(response, file=discord.File(file_to_upload))
+                        logger.info("File uploaded successfully!")
+                    except Exception as e:
+                        logger.error(f"Failed to upload file: {e}", exc_info=True)
+                        await message.reply(response + f"\n\n⚠️ File upload failed: {str(e)}")
+                else:
+                    await message.reply(response)
 
             logger.info(f"Response sent to {message.author}")
 

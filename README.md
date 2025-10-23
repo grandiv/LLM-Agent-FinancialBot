@@ -4,6 +4,7 @@ Asisten keuangan pribadi berbasis AI yang menggunakan Large Language Model (LLM)
 
 ## 🌟 Fitur
 
+**Core Features:**
 - **💬 Natural Language Understanding**: Berbicara dengan bot menggunakan bahasa Indonesia yang natural, tidak perlu command khusus
 - **💵 Pencatatan Pemasukan & Pengeluaran**: Otomatis mengekstrak data transaksi dari percakapan
 - **💰 Manajemen Saldo**: Tracking real-time pemasukan, pengeluaran, dan saldo
@@ -12,6 +13,12 @@ Asisten keuangan pribadi berbasis AI yang menggunakan Large Language Model (LLM)
 - **🛍️ Analisis Pembelian**: Analisis kemampuan beli untuk item tertentu dengan rekomendasi
 - **🧠 Conversation Memory**: Bot mengingat konteks percakapan untuk interaksi yang lebih natural
 - **👥 Multi-User Support**: Setiap user memiliki data keuangan yang terisolasi
+
+**NEW - MCP Enhanced Features:**
+- **📁 Export Reports**: Ekspor laporan keuangan ke CSV atau Excel dengan multiple sheets
+- **🔍 Real-time Price Search**: Pencarian harga barang online untuk analisis pembelian yang lebih akurat
+- **📈 Advanced Analytics**: Analisis tren pengeluaran bulanan dengan visualisasi data
+- **📅 Smart Reminders**: Set reminder untuk tagihan dan budget review dengan tracking otomatis
 
 ## 🏗️ Arsitektur
 
@@ -29,10 +36,13 @@ Asisten keuangan pribadi berbasis AI yang menggunakan Large Language Model (LLM)
 │ (OpenRouter)     │      Function Calling untuk extract intent
 └──────┬───────────┘
        ↓
-┌──────────────────┐
-│ Database Layer   │  ←  SQLite untuk data persistence
-│ (SQLite)         │
-└──────────────────┘
+┌──────────────────────────────────────────────────┐
+│ Database Layer   │  MCP Manager (NEW!)           │
+│ (SQLite)         │  ├─ File System (Export)      │
+│                  │  ├─ Web Search (Prices)       │
+│                  │  ├─ Analytics (Trends)        │
+│                  │  └─ Calendar (Reminders)      │
+└──────────────────────────────────────────────────┘
 ```
 
 ## 📋 Requirements
@@ -213,6 +223,100 @@ Bot: Wah selamat ya! 🎉 Saya sudah mencatat pemasukan kamu sebesar
      💰 Saldo kamu sekarang: Rp 5,000,000
 ```
 
+### NEW - Export Reports (MCP)
+
+```
+User: ekspor laporan aku ke excel dong
+Bot: Baik, saya akan ekspor laporan keuangan kamu ke format Excel...
+
+     ✅ Berhasil mengekspor laporan lengkap ke financial_report_user123_20250122.xlsx
+     📊 File berisi 25 transaksi dengan 3 sheet:
+       • Transactions (detail transaksi)
+       • Summary (ringkasan keuangan)
+       • Categories (breakdown per kategori)
+```
+
+### NEW - Price Search (MCP)
+
+```
+User: berapa harga laptop sekarang?
+Bot: 🔍 Hasil pencarian harga untuk 'laptop':
+       • Harga terendah: Rp 3,000,000
+       • Harga tertinggi: Rp 25,000,000
+       • Harga rata-rata: Rp 8,000,000
+
+     💡 Harga bisa bervariasi tergantung spesifikasi dan toko
+```
+
+### NEW - Smart Purchase Analysis (MCP)
+
+```
+User: aku mau beli iPhone nih, mampu ga ya?
+Bot: Saya cari harga iPhone online dulu ya...
+
+     🔍 Hasil pencarian harga untuk 'iPhone':
+       • Harga terendah: Rp 8,000,000
+       • Harga tertinggi: Rp 25,000,000
+       • Harga rata-rata: Rp 15,000,000
+
+     Saya akan analisis berdasarkan harga rata-rata: Rp 15,000,000
+
+     🛍️ **Analisis Pembelian iPhone:**
+     Harga: Rp 15,000,000
+     Saldo kamu: Rp 5,000,000
+
+     ❌ Belum mampu. Kurang: Rp 10,000,000
+
+     💡 Jika menabung 30% dari pemasukan (Rp 1,500,000/bulan),
+        kamu perlu 6.7 bulan untuk bisa beli ini.
+```
+
+### NEW - Spending Trends (MCP)
+
+```
+User: analisis tren pengeluaran aku dong
+Bot: Baik, saya analisis pola pengeluaran kamu...
+
+     📊 **Analisis Tren Pengeluaran:**
+
+     **Tren Bulanan:**
+       • 2025-01: Rp 2,500,000
+       • 2025-02: Rp 3,200,000
+
+     **Top 5 Kategori Pengeluaran:**
+       1. Makanan: Rp 1,500,000 (46.9%)
+       2. Transport: Rp 800,000 (25.0%)
+       3. Hiburan: Rp 500,000 (15.6%)
+       4. Tagihan: Rp 300,000 (9.4%)
+       5. Lainnya: Rp 100,000 (3.1%)
+
+     💡 **Insight:** Pengeluaran bulan ini naik dibanding bulan lalu
+```
+
+### NEW - Reminders (MCP)
+
+```
+User: ingatkan aku bayar listrik tanggal 5
+Bot: Baik, saya buatkan reminder untuk kamu...
+
+     ✅ Reminder berhasil ditambahkan!
+     📅 Bayar listrik
+     🗓️ Jatuh tempo: 05 Februari 2025
+     🏷️ Kategori: Tagihan
+
+User: tampilkan reminder aku
+Bot: 📅 **Reminder Kamu (3):**
+
+     ⏰ [1] Bayar listrik
+        🗓️ 05 Februari 2025 | 🏷️ Tagihan
+
+     ⏰ [2] Bayar internet
+        🗓️ 10 Februari 2025 | 🏷️ Tagihan
+
+     ⏰ [3] Review budget bulanan
+        🗓️ 28 Februari 2025 | 🏷️ Lainnya
+```
+
 ### Mencatat Pengeluaran
 
 ```
@@ -320,11 +424,14 @@ pip install -r requirements.txt --force-reinstall
 
 ## 🎯 Upcoming Features
 
-- [ ] Export laporan ke Excel/CSV
-- [ ] Grafik visualisasi pengeluaran
-- [ ] Reminder untuk budget bulanan
+- [x] ~~Export laporan ke Excel/CSV~~ ✅ **DONE (MCP Integration)**
+- [x] ~~Reminder untuk budget bulanan~~ ✅ **DONE (MCP Integration)**
+- [x] ~~Advanced analytics & trends~~ ✅ **DONE (MCP Integration)**
+- [x] ~~Price search integration~~ ✅ **DONE (MCP Integration)**
+- [ ] Grafik visualisasi pengeluaran (charts/graphs)
 - [ ] Multi-currency support
 - [ ] WhatsApp integration
+- [ ] Real-time web search API (currently simulated)
 
 ## 📝 License
 

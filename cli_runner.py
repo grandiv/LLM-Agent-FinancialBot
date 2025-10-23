@@ -117,8 +117,16 @@ def main():
             print("\n⏳ Memproses...")
             response = bot_core.process_message(cli_user_id, cli_username, user_input)
 
-            # Display response
-            print(f"\n🤖 Bot:\n{response}\n")
+            # Handle dict response (file export)
+            if isinstance(response, dict):
+                message = response.get("message", "")
+                file_path = response.get("file_path")
+                print(f"\n🤖 Bot:\n{message}\n")
+                if file_path:
+                    print(f"📁 File tersimpan di: {file_path}\n")
+            else:
+                # Display response
+                print(f"\n🤖 Bot:\n{response}\n")
             print("═══════════════════════════════════════════════════\n")
 
         except KeyboardInterrupt:
