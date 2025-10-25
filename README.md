@@ -24,7 +24,7 @@ Asisten keuangan pribadi berbasis AI yang menggunakan Large Language Model (LLM)
 - **🧠 Conversation Memory**: Bot mengingat konteks percakapan untuk interaksi yang lebih natural
 - **👥 Multi-User Support**: Setiap user memiliki data keuangan yang terisolasi
 - **📁 Export Reports**: Ekspor laporan keuangan ke CSV atau Excel dengan multiple sheets (local pandas utility)
-- **🔍 Real-time Price Search**: Pencarian harga barang online menggunakan TRUE MCP integration dengan web-search-mcp server
+- **🔍 Real-time Price Search**: Pencarian harga barang online menggunakan MCP integration dengan web-search-mcp server
 - **📈 Advanced Analytics**: Analisis tren pengeluaran bulanan dengan pandas (local utility)
 - **📅 Smart Reminders**: Set reminder untuk tagihan dan budget review dengan JSON storage (local utility)
 
@@ -45,7 +45,7 @@ Asisten keuangan pribadi berbasis AI yang menggunakan Large Language Model (LLM)
 └──────┬───────────┘
        ↓
 ┌──────────────────────────────────────────────────┐
-│ Database Layer   │  Enhanced Features (NEW!)     │
+│ Database Layer   │  Features                     │
 │ (SQLite)         │  ├─ File Export (pandas util) │
 │                  │  ├─ Web Search (MCP)          │
 │                  │  ├─ Analytics (pandas util)   │
@@ -237,7 +237,7 @@ Bot: Wah selamat ya! 🎉 Saya sudah mencatat pemasukan kamu sebesar
      💰 Saldo kamu sekarang: Rp 5,000,000
 ```
 
-### NEW - Export Reports (Local Utility)
+### Export Reports (Local Utility)
 
 ```
 User: ekspor laporan aku ke excel dong
@@ -250,7 +250,7 @@ Bot: Baik, saya akan ekspor laporan keuangan kamu ke format Excel...
        • Categories (breakdown per kategori)
 ```
 
-### NEW - Price Search (TRUE MCP Integration)
+### Price Search (MCP Integration)
 
 ```
 User: berapa harga laptop sekarang?
@@ -262,7 +262,7 @@ Bot: 🔍 Hasil pencarian harga untuk 'laptop':
      💡 Harga bisa bervariasi tergantung spesifikasi dan toko
 ```
 
-### NEW - Smart Purchase Analysis (with TRUE MCP Web Search)
+### Smart Purchase Analysis (MCP Web Search)
 
 ```
 User: aku mau beli iPhone nih, mampu ga ya?
@@ -285,7 +285,7 @@ Bot: Saya cari harga iPhone online dulu ya...
         kamu perlu 6.7 bulan untuk bisa beli ini.
 ```
 
-### NEW - Spending Trends (Local pandas Utility)
+### Spending Trends (Local pandas Utility)
 
 ```
 User: analisis tren pengeluaran aku dong
@@ -307,7 +307,7 @@ Bot: Baik, saya analisis pola pengeluaran kamu...
      💡 **Insight:** Pengeluaran bulan ini naik dibanding bulan lalu
 ```
 
-### NEW - Reminders (Local JSON Storage)
+### Reminders (Local JSON Storage)
 
 ```
 User: ingatkan aku bayar listrik tanggal 5
