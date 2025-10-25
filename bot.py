@@ -120,17 +120,12 @@ class FinancialDiscordBot(discord.Client):
 
             # Show typing indicator
             async with message.channel.typing():
-                # Process message through bot core
+                # Process message through bot core (now fully async - no blocking!)
                 user_id = str(message.author.id)
                 username = message.author.display_name
 
-                # Run bot_core.process_message in thread pool to avoid blocking
-                loop = asyncio.get_event_loop()
-                response = await loop.run_in_executor(
-                    None,
-                    self.bot_core.process_message,
-                    user_id, username, content
-                )
+                # Direct await - native async, no thread pool needed
+                response = await self.bot_core.process_message(user_id, username, content)
 
             # Check if response includes file to upload
             file_to_upload = None

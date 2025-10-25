@@ -7,7 +7,7 @@ import json
 import logging
 from typing import Dict, List, Optional
 from openai import OpenAI
-from .prompts import SYSTEM_PROMPT, FUNCTION_TOOLS, get_user_context_prompt, ERROR_RESPONSES
+from .prompts import SYSTEM_PROMPT, get_user_context_prompt, ERROR_RESPONSES
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,7 @@ class LLMAgent:
         )
         self.model = model
         self.conversation_history: Dict[str, List[Dict]] = {}  # user_id -> messages
+        self.conversation_context: Dict[str, Dict] = {}  # user_id -> context entities
         self.max_history = 5  # Simpan 5 message terakhir untuk konteks
 
     def _get_conversation_history(self, user_id: str) -> List[Dict]:
@@ -94,40 +95,23 @@ class LLMAgent:
             # Get conversation history
             history = self._get_conversation_history(user_id)
 
+            # Build context hint and inject into message
+            context_hint = self._build_context_hint(user_id)
+            message_with_context = message + context_hint if context_hint else message
+
             # Build messages
-            messages = self._build_messages(message, user_context, history)
+            messages = self._build_messages(message_with_context, user_context, history)
 
-            # Call OpenRouter API
-            logger.info(f"Calling OpenRouter API for user {user_id}")
+            # Call OpenRouter API with JSON mode
+            logger.info(f"Calling OpenRouter API (JSON mode) for user {user_id}")
 
-            # Try with function calling first (for models that support it)
-            use_function_calling = False
-            try:
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    tools=FUNCTION_TOOLS,
-                    tool_choice="auto",
-                    temperature=0.7,
-                    max_tokens=1000
-                )
-                use_function_calling = True
-                logger.info("Using function calling mode")
-            except Exception as e:
-                # If function calling fails, use standard mode and parse JSON from content
-                error_msg = str(e).lower()
-                if "tool" in error_msg or "function" in error_msg or "404" in error_msg:
-                    logger.info(f"Function calling not supported, using JSON mode")
-                    response = self.client.chat.completions.create(
-                        model=self.model,
-                        messages=messages,
-                        temperature=0.7,
-                        max_tokens=1500
-                    )
-                    use_function_calling = False
-                else:
-                    # Some other error, re-raise
-                    raise
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                response_format={"type": "json_object"},  # Guaranteed JSON response
+                temperature=0.3,  # Lower temperature for consistent intent extraction
+                max_tokens=800  # Reduced from 1500 (JSON is concise)
+            )
 
             # Parse response
             response_message = response.choices[0].message
@@ -135,45 +119,28 @@ class LLMAgent:
             # Add to conversation history
             self._add_to_history(user_id, "user", message)
 
-            # Parse based on response type
-            if use_function_calling and response_message.tool_calls:
-                # Function calling mode
-                tool_call = response_message.tool_calls[0]
-                function_args = json.loads(tool_call.function.arguments)
+            # Parse JSON response
+            try:
+                response_text = response_message.content or "{}"
+
+                # DeepSeek R1 models may include <think> tags, extract JSON from content
+                if "<think>" in response_text and "</think>" in response_text:
+                    response_text = response_text.split("</think>")[-1].strip()
+
+                # Parse JSON (guaranteed to be valid with json_object mode)
+                function_args = json.loads(response_text)
                 result = self._validate_function_response(function_args)
-            else:
-                # JSON mode - parse content as JSON
-                try:
-                    response_text = response_message.content or "{}"
 
-                    # DeepSeek R1 models may include <think> tags, extract JSON from content
-                    # Remove think tags if present
-                    if "<think>" in response_text and "</think>" in response_text:
-                        # Extract content after </think>
-                        response_text = response_text.split("</think>")[-1].strip()
+            except json.JSONDecodeError as e:
+                logger.warning(f"JSON parsing failed: {e}, content: {response_text[:200]}")
+                # Fallback if JSON parsing fails (rare with json_object mode)
+                result = {
+                    "intent": "casual_chat",
+                    "response_text": "Maaf, saya kurang mengerti. Bisa dijelaskan lagi?"
+                }
 
-                    # Find JSON object in the response (handle case where there's extra text)
-                    start_idx = response_text.find("{")
-                    end_idx = response_text.rfind("}") + 1
-
-                    if start_idx != -1 and end_idx > start_idx:
-                        json_str = response_text[start_idx:end_idx]
-                        function_args = json.loads(json_str)
-                        result = self._validate_function_response(function_args)
-                    else:
-                        # No JSON found, treat as casual chat
-                        result = {
-                            "intent": "casual_chat",
-                            "response_text": response_text
-                        }
-
-                except json.JSONDecodeError as e:
-                    logger.warning(f"JSON parsing failed: {e}, content: {response_text[:200]}")
-                    # Fallback if JSON parsing fails
-                    result = {
-                        "intent": "casual_chat",
-                        "response_text": response_message.content or "Maaf, saya kurang mengerti."
-                    }
+            # Extract and store entities to context
+            self._extract_and_store_entities(user_id, result)
 
             # Add assistant response to history
             if "response_text" in result:
@@ -237,3 +204,122 @@ class LLMAgent:
     def get_history_length(self, user_id: str) -> int:
         """Dapatkan panjang riwayat percakapan user"""
         return len(self._get_conversation_history(user_id))
+
+    # ============================================================================
+    # CONTEXT TRACKING METHODS (NEW)
+    # ============================================================================
+
+    def _get_context(self, user_id: str, key: str, default=None):
+        """
+        Ambil entity dari conversation context
+
+        Args:
+            user_id: ID pengguna
+            key: Context key (e.g., 'last_searched_item', 'last_mentioned_amount')
+            default: Default value jika tidak ditemukan
+
+        Returns:
+            Context value atau default
+        """
+        if user_id not in self.conversation_context:
+            return default
+        return self.conversation_context[user_id].get(key, default)
+
+    def _update_context(self, user_id: str, key: str, value):
+        """
+        Simpan entity ke conversation context
+
+        Args:
+            user_id: ID pengguna
+            key: Context key
+            value: Context value
+        """
+        if user_id not in self.conversation_context:
+            self.conversation_context[user_id] = {}
+
+        self.conversation_context[user_id][key] = value
+        logger.debug(f"Updated context for user {user_id}: {key} = {value}")
+
+    def _clear_context(self, user_id: str):
+        """Hapus semua context entities untuk user"""
+        if user_id in self.conversation_context:
+            self.conversation_context[user_id] = {}
+            logger.info(f"Cleared conversation context for user {user_id}")
+
+    def _build_context_hint(self, user_id: str) -> str:
+        """
+        Build context hint string untuk disisipkan ke user message
+
+        Returns:
+            String berisi context hints (kosong jika tidak ada context)
+        """
+        context = self.conversation_context.get(user_id, {})
+        if not context:
+            return ""
+
+        hints = []
+
+        # Last searched item
+        if "last_searched_item" in context:
+            item_data = context["last_searched_item"]
+            item_name = item_data.get("name", "")
+            price = item_data.get("price", 0)
+            if item_name:
+                hint = f"Barang terakhir dicari: {item_name}"
+                if price > 0:
+                    hint += f" (harga: Rp {price:,.0f})"
+                hints.append(hint)
+
+        # Last mentioned amount
+        if "last_mentioned_amount" in context:
+            amount = context["last_mentioned_amount"]
+            hints.append(f"Jumlah terakhir disebutkan: Rp {amount:,.0f}")
+
+        # Last transaction ID
+        if "last_transaction_id" in context:
+            trans_id = context["last_transaction_id"]
+            hints.append(f"Transaksi terakhir: ID #{trans_id}")
+
+        # Pending action
+        if "pending_action" in context:
+            action = context["pending_action"]
+            hints.append(f"Aksi tertunda: {action}")
+
+        if hints:
+            return "\n[KONTEKS PERCAKAPAN: " + " | ".join(hints) + "]"
+        return ""
+
+    def _extract_and_store_entities(self, user_id: str, result: Dict):
+        """
+        Extract entities dari LLM result dan simpan ke context
+
+        Args:
+            user_id: ID pengguna
+            result: Result dari LLM processing
+        """
+        intent = result.get("intent")
+
+        # Store last mentioned amount
+        if "amount" in result and result["amount"]:
+            self._update_context(user_id, "last_mentioned_amount", result["amount"])
+
+        # Store last searched/mentioned item
+        if "item_name" in result and result["item_name"]:
+            item_data = {"name": result["item_name"]}
+            if "amount" in result:
+                item_data["price"] = result["amount"]
+            self._update_context(user_id, "last_searched_item", item_data)
+
+        # Store transaction ID
+        if "transaction_id" in result and result["transaction_id"]:
+            self._update_context(user_id, "last_transaction_id", result["transaction_id"])
+
+        # Store pending action based on intent
+        if intent == "search_price":
+            self._update_context(user_id, "pending_action", "considering_purchase")
+        elif intent == "purchase_analysis":
+            self._update_context(user_id, "pending_action", "analyzing_purchase")
+        elif intent in ["record_income", "record_expense"]:
+            # Clear pending action after recording
+            if "pending_action" in self.conversation_context.get(user_id, {}):
+                del self.conversation_context[user_id]["pending_action"]

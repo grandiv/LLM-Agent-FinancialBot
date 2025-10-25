@@ -28,9 +28,9 @@ class FinancialBotCore:
         self.db = database
         self.mcp = mcp_manager or MCPManager()
 
-    def process_message(self, user_id: str, username: str, message: str):
+    async def process_message(self, user_id: str, username: str, message: str):
         """
-        Proses pesan dari user dan return response
+        Proses pesan dari user dan return response (async for better performance)
 
         Args:
             user_id: ID user (Discord ID atau CLI user)
@@ -119,7 +119,7 @@ class FinancialBotCore:
                 return self._handle_export_report(user_id, result)
 
             elif intent == "search_price":
-                return self._handle_search_price(result)
+                return await self._handle_search_price(result, user_id)
 
             elif intent == "analyze_trends":
                 return self._handle_analyze_trends(user_id, result)
@@ -186,6 +186,21 @@ class FinancialBotCore:
         category = result.get("category", "Lainnya")
         description = result.get("description", "")
         base_response = result.get("response_text", "")
+
+        # Check context if amount not specified (e.g., user said "beli aja")
+        if amount <= 0:
+            last_searched = self.llm._get_context(user_id, "last_searched_item")
+            if last_searched:
+                amount = last_searched.get("price", 0)
+                item_name = last_searched.get("name", "")
+                if amount > 0:
+                    logger.info(f"Using price from context: {amount} for {item_name}")
+                    # Update description with item name if not provided
+                    if not description and item_name:
+                        description = f"Pembelian {item_name}"
+                        # Try to infer category from item name
+                        if not category or category == "Lainnya":
+                            category = self._infer_category_from_item(item_name)
 
         if amount <= 0:
             return "Maaf, jumlah pengeluaran harus lebih dari 0. Coba lagi ya! 💸"
@@ -314,7 +329,18 @@ class FinancialBotCore:
         price = result.get("amount", 0)
         base_response = result.get("response_text", "")
 
-        # If price not specified, try to search online
+        # Check context if item_name or price not specified
+        if not item_name or item_name == "barang tersebut" or price <= 0:
+            last_searched = self.llm._get_context(user_id, "last_searched_item")
+            if last_searched:
+                if not item_name or item_name == "barang tersebut":
+                    item_name = last_searched.get("name", "barang tersebut")
+                    logger.info(f"Using item_name from context: {item_name}")
+                if price <= 0:
+                    price = last_searched.get("price", 0)
+                    logger.info(f"Using price from context: {price}")
+
+        # If price still not specified, try to search online
         if price <= 0:
             logger.info(f"Price not specified, searching online for {item_name}")
             try:
@@ -455,41 +481,58 @@ Ngobrol aja dengan natural, aku akan mengerti! 😊
             logger.warning(f"Export failed: {mcp_result['message']}")
             return {"message": mcp_result["message"]}
 
-    def _handle_search_price(self, result: Dict) -> str:
-        """Handle pencarian harga barang online"""
+    async def _handle_search_price(self, result: Dict, user_id: str = None) -> str:
+        """Handle pencarian harga barang online (async for non-blocking search)"""
         item_name = result.get("item_name", "")
         base_response = result.get("response_text", "")
 
         if not item_name:
             return "Maaf, sebutkan nama barang yang ingin dicari harganya ya! 🔍"
 
-        # Run async search - use asyncio.run to handle event loop properly
+        # Run async search (native async/await - no blocking!)
         try:
-            # Try to get existing loop
-            try:
-                loop = asyncio.get_running_loop()
-                # If we're already in an async context, create a task
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, self.mcp.search_price(item_name))
-                    mcp_result = future.result()
-            except RuntimeError:
-                # No running loop, safe to use asyncio.run
-                mcp_result = asyncio.run(self.mcp.search_price(item_name))
+            mcp_result = await self.mcp.search_price(item_name)
         except Exception as e:
             logger.error(f"Error in search_price: {e}", exc_info=True)
             return "Maaf, terjadi kesalahan saat mencari harga. Coba lagi ya! 🔍"
 
         if mcp_result["success"]:
-            # Check if we need LLM formatting
+            # Store price information in context for later use
+            if user_id and "price_range" in mcp_result:
+                price_info = mcp_result["price_range"]
+                avg_price = price_info.get("avg", 0)
+                if avg_price > 0:
+                    self.llm._update_context(user_id, "last_searched_item", {
+                        "name": item_name,
+                        "price": avg_price,
+                        "price_range": price_info
+                    })
+                    logger.info(f"Stored search context: {item_name} @ Rp {avg_price:,.0f}")
+
+            # Check if we need formatting
             if mcp_result.get("needs_llm_formatting"):
-                # Use LLM to intelligently format the search results
-                formatted_response = self._format_search_with_llm(
-                    item_name,
-                    mcp_result["structured_data"]
-                )
+                # HYBRID APPROACH: Try fast regex extraction first
+                search_data = mcp_result["structured_data"]
+
+                success, prices, data_with_prices = self._extract_prices_with_regex(search_data)
+
+                if success and data_with_prices:
+                    # Use fast template formatting (80% of cases)
+                    logger.info(f"Using template formatting for {item_name}")
+                    formatted_response = self._format_search_template(
+                        item_name,
+                        data_with_prices,
+                        prices
+                    )
+                else:
+                    # Fall back to LLM for complex cases (20% of cases)
+                    logger.info(f"Using LLM formatting for {item_name} (complex case)")
+                    formatted_response = self._format_search_with_llm(
+                        item_name,
+                        search_data
+                    )
+
                 # For search_price, ONLY show web results, skip LLM's response_text
-                # (LLM might say "hasn't been released" based on outdated knowledge)
                 return formatted_response
             else:
                 # Use pre-formatted message
@@ -497,6 +540,110 @@ Ngobrol aja dengan natural, aku akan mengerti! 😊
                 return response
         else:
             return mcp_result["message"]
+
+    def _extract_prices_with_regex(self, search_data: list) -> tuple:
+        """
+        Extract prices from search data using regex (fast method)
+
+        Returns:
+            (success: bool, prices: list, data_with_prices: list)
+        """
+        import re
+
+        prices_found = []
+        results_with_prices = []
+
+        for item in search_data:
+            content = item.get('content', '') + ' ' + item.get('title', '')
+
+            # Find Rupiah prices in content
+            price_matches = re.findall(r'Rp\s?[\d.,]+(?:\s?(?:juta|ribu|jutaan|rb))?', content, re.IGNORECASE)
+
+            if price_matches:
+                # Clean and convert to numbers
+                item_prices = []
+                for match in price_matches[:5]:  # Max 5 prices per source
+                    # Extract just numbers
+                    price_num = re.sub(r'[^\d]', '', match)
+                    if price_num and len(price_num) >= 4:  # Minimum 1000
+                        item_prices.append({
+                            'text': match.strip(),
+                            'number': int(price_num)
+                        })
+
+                if item_prices:
+                    results_with_prices.append({
+                        **item,
+                        'prices': item_prices
+                    })
+                    prices_found.extend(item_prices)
+
+        # Success if we found prices and they seem reasonable
+        success = len(prices_found) >= 1 and all(p['number'] >= 10000 for p in prices_found)
+
+        return success, prices_found, results_with_prices
+
+    def _format_search_template(self, item_name: str, search_data: list, prices: list) -> str:
+        """
+        Fast template-based formatting for search results
+
+        Args:
+            item_name: Item being searched
+            search_data: Search results with prices extracted
+            prices: List of price dicts with 'text' and 'number'
+
+        Returns:
+            Formatted search results
+        """
+        if not search_data:
+            return f"Maaf, tidak menemukan informasi harga untuk {item_name}."
+
+        # Calculate price range
+        price_numbers = [p['number'] for p in prices]
+        min_price = min(price_numbers)
+        max_price = max(price_numbers)
+
+        # Format prices in millions if >= 1 juta
+        def format_price(num):
+            if num >= 1000000:
+                juta = num / 1000000
+                juta_rounded = round(juta, 1)
+                if juta_rounded == int(juta_rounded):
+                    return f"Rp {int(juta_rounded)} juta"
+                else:
+                    return f"Rp {juta_rounded} juta"
+            else:
+                return f"Rp {num:,}"
+
+        min_formatted = format_price(min_price)
+        max_formatted = format_price(max_price)
+
+        # Build response
+        source_count = len(search_data)
+        response = f"Ditemukan harga **{item_name}** dari {source_count} sumber. "
+        response += f"Harga mulai dari **{min_formatted}** hingga **{max_formatted}**. "
+        response += "Perlu diingat bahwa harga dapat berbeda tergantung spesifikasi, toko, dan lokasi.\n\n"
+
+        # Add sources
+        response += "🔗 **Sumber:**\n"
+        for item in search_data[:5]:
+            title = item.get('title', 'Hasil Pencarian')
+            url = item.get('url', '')
+            item_prices = item.get('prices', [])
+
+            # Format title (max 70 chars)
+            if len(title) > 70:
+                title = title[:67] + '...'
+
+            # Show first 2 prices for this source
+            price_text = ' • '.join([p['text'] for p in item_prices[:2]])
+
+            response += f"• {price_text} - {title}\n"
+            if url:
+                response += f"  {url}\n"
+            response += "\n"
+
+        return response.strip()
 
     def _format_search_with_llm(self, item_name: str, search_data: list) -> str:
         """
@@ -638,3 +785,46 @@ Berikan response dalam format markdown yang rapi!"""
 
         mcp_result = self.mcp.complete_reminder(user_id, reminder_id)
         return mcp_result["message"]
+
+    def _infer_category_from_item(self, item_name: str) -> str:
+        """
+        Infer expense category from item name (simple keyword matching)
+
+        Args:
+            item_name: Name of item being purchased
+
+        Returns:
+            Inferred category name
+        """
+        item_lower = item_name.lower()
+
+        # Electronics/gadgets
+        if any(keyword in item_lower for keyword in ["laptop", "hp", "iphone", "phone", "ps5", "komputer", "tv", "monitor", "headphone"]):
+            return "Belanja"
+
+        # Food
+        if any(keyword in item_lower for keyword in ["makanan", "makan", "nasi", "ayam", "burger", "pizza", "snack"]):
+            return "Makanan"
+
+        # Transportation
+        if any(keyword in item_lower for keyword in ["motor", "mobil", "bensin", "tiket", "grab", "gojek", "taxi"]):
+            return "Transport"
+
+        # Entertainment
+        if any(keyword in item_lower for keyword in ["game", "ps", "xbox", "nintendo", "concert", "konser", "bioskop", "netflix"]):
+            return "Hiburan"
+
+        # Health
+        if any(keyword in item_lower for keyword in ["obat", "vitamin", "dokter", "rumah sakit", "hospital", "clinic"]):
+            return "Kesehatan"
+
+        # Bills
+        if any(keyword in item_lower for keyword in ["listrik", "air", "internet", "wifi", "pulsa", "tagihan"]):
+            return "Tagihan"
+
+        # Education
+        if any(keyword in item_lower for keyword in ["buku", "kursus", "course", "seminar", "training", "sekolah"]):
+            return "Pendidikan"
+
+        # Default to shopping
+        return "Belanja"

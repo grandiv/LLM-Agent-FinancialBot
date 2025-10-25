@@ -52,8 +52,8 @@ Contoh pesan:
 """
     print(banner)
 
-def main():
-    """Main CLI function"""
+async def main():
+    """Main CLI function (async for better performance)"""
     print_banner()
 
     # Check for OpenRouter API key
@@ -116,13 +116,13 @@ def main():
                 continue
 
             elif user_input.lower() == '/help':
-                response = bot_core.process_message(cli_user_id, cli_username, "help")
+                response = await bot_core.process_message(cli_user_id, cli_username, "help")
                 print(f"\n🤖 Bot:\n{response}\n")
                 continue
 
-            # Process message
+            # Process message (async - no blocking!)
             print("\n⏳ Memproses...")
-            response = bot_core.process_message(cli_user_id, cli_username, user_input)
+            response = await bot_core.process_message(cli_user_id, cli_username, user_input)
 
             # Handle dict response (file export)
             if isinstance(response, dict):
@@ -145,4 +145,5 @@ def main():
             logger.error(f"Error in CLI loop: {e}", exc_info=True)
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())

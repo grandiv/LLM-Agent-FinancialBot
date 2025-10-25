@@ -29,7 +29,7 @@
 - 🤖 **AI-Powered:** Uses OpenRouter API with DeepSeek R1T2 Chimera model for natural language understanding
 - 💬 **Conversational:** No fixed commands - understands casual Indonesian language naturally
 - 💰 **Intelligent:** Provides budget advice, purchase analysis, and personalized recommendations
-- 🔧 **MCP-Enhanced:** Model Context Protocol integration with 4 external tool integrations
+- 🔧 **Enhanced Features:** Advanced capabilities including real MCP integration (web search) + local utilities (export, analytics, reminders)
 - 🧪 **Tested:** 45 comprehensive test cases with 100% pass rate (28 core + 17 MCP)
 - 💵 **Free:** Uses free-tier LLM model with zero API costs
 
@@ -135,9 +135,9 @@ Bot: Wah selamat ya! 🎉 Saya sudah mencatat pemasukan kamu
 - **DeepSeek R1T2 Chimera** - Free, high-quality language model
 - **Function Calling** - Structured output from LLM
 - **Prompt Engineering** - Optimized system prompts
-- **MCP (Model Context Protocol)** - External tool integration framework
-- **pandas 2.3.3** - Data processing for analytics
-- **openpyxl 3.1.5** - Excel file generation
+- **MCP (Model Context Protocol)** - True MCP integration for web search via web-search-mcp server
+- **pandas 2.3.3** - Data processing for analytics (local utility)
+- **openpyxl 3.1.5** - Excel file generation (local utility)
 
 ---
 
@@ -176,7 +176,7 @@ Bot: Wah selamat ya! 🎉 Saya sudah mencatat pemasukan kamu
 │  │ • Report generation                            │         │
 │  │ • Budget advice logic                          │         │
 │  │ • Purchase analysis (with price search)        │         │
-│  │ • MCP tool integration NEW!                   │         │
+│  │ • Enhanced features integration NEW!          │         │
 │  └────────────────────────────────────────────────┘         │
 └────┬───────┬────────────────────────────┬───────────────────┘
      │       │                            │
@@ -208,18 +208,20 @@ Bot: Wah selamat ya! 🎉 Saya sudah mencatat pemasukan kamu
      │
      ↓
 ┌─────────────────────────────────────────────────────────────┐
-│              MCP Tools Layer NEW!                           │
+│           Enhanced Features Layer NEW!                      │
 │                                                              │
 │                    mcp_manager.py                            │
 │  ┌───────────────┐  ┌────────────────┐  ┌──────────────┐   │
-│  │ File System   │  │  Web Search    │  │  Analytics   │   │
+│  │ File Export   │  │  Web Search    │  │  Analytics   │   │
 │  │ • Export CSV  │  │ • Price Lookup │  │ • Trends     │   │
-│  │ • Export Excel│  │ • Simulated DB │  │ • pandas     │   │
-│  └───────────────┘  └────────────────┘  └──────────────┘   │
+│  │ • Export Excel│  │ • TRUE MCP ✅  │  │ • pandas     │   │
+│  │ (pandas util) │  │ • web-search-  │  │ (local util) │   │
+│  └───────────────┘  │   mcp server   │  └──────────────┘   │
+│                     └────────────────┘                       │
 │  ┌──────────────────────────────────────────────────────┐   │
-│  │           Calendar/Reminders                         │   │
-│  │           • JSON storage                             │   │
+│  │           Reminders (local JSON storage)             │   │
 │  │           • Date parsing                             │   │
+│  │           • Completion tracking                      │   │
 │  └──────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
              │
@@ -722,25 +724,25 @@ Bot: [Remembers: discussing budgeting 5 juta]
 
 ---
 
-## MCP Integration (Model Context Protocol)
+## Enhanced Features Integration
 
 ### Overview
 
-**MCP (Model Context Protocol)** is an open standard introduced by Anthropic in November 2024 that standardizes how AI systems integrate with external tools, systems, and data sources. FinancialBot implements MCP to extend the LLM's capabilities beyond simple chat responses.
+FinancialBot extends the LLM's capabilities with a hybrid approach combining **true MCP integration** (web search) and **local utility functions** (file export, analytics, reminders). This provides advanced features while maintaining simplicity and reliability.
 
-### What MCP Enables
+### What Enhanced Features Enable
 
-**Before MCP:**
-- Bot can only chat
+**Before Enhanced Features:**
+- Bot can only chat and manage database
 - No file generation
 - No external data access
 - Limited to LLM's training data
 
-**With MCP:**
-- Bot can create and upload files (Excel/CSV)
-- Bot can search for prices (simulated web search)
-- Bot can perform advanced analytics
-- Bot can manage reminders
+**With Enhanced Features:**
+- Bot can create and upload files (Excel/CSV) via local pandas operations
+- Bot can search for real-time prices via **TRUE MCP** integration with web-search-mcp server
+- Bot can perform advanced analytics using pandas DataFrames
+- Bot can manage reminders with JSON file storage
 
 ### Architecture
 
@@ -750,11 +752,11 @@ User: "ekspor laporan ke excel"
 1. Intent Detection (keyword/LLM)
    → export_report intent
   ↓
-2. Bot Core Routes to MCP Handler
+2. Bot Core Routes to Handler
    → _handle_export_report()
   ↓
-3. MCP Manager Creates File
-   → export_to_excel()
+3. Enhanced Features Manager Creates File
+   → export_to_excel() [LOCAL UTILITY]
    → Uses pandas + openpyxl
    → Saves to exports/ folder
   ↓
@@ -765,9 +767,15 @@ User: "ekspor laporan ke excel"
 5. User Receives Excel File ✅
 ```
 
-### 4 MCP Tools Implemented
+### 4 Enhanced Features Implemented
 
-#### 1. **File System Server** (`mcp_manager.py:export_to_csv/excel`)
+**Implementation Type Legend:**
+- ✅ **TRUE MCP** = External MCP server via Model Context Protocol
+- ❌ **Local Utility** = Direct Python operations (pandas, JSON, file I/O)
+
+#### 1. **File Export Features** (`mcp_manager.py:export_to_csv/excel`) ❌ Local Utility
+
+**Implementation Type:** Local Python file operations (NOT an MCP server)
 
 **Capabilities:**
 - Export transaction history to CSV format
@@ -782,7 +790,7 @@ User: "ekspor laporan ke excel"
 ```python
 def export_to_excel(self, user_id: str, transactions: List[Dict],
                    balance_data: Dict, category_report: Dict):
-    # Create Excel writer
+    # Direct file I/O using pandas + openpyxl (NOT MCP)
     with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
         # Sheet 1: Transactions
         df_trans = pd.DataFrame(transactions)
@@ -804,33 +812,41 @@ Bot: ✅ Berhasil mengekspor laporan lengkap ke financial_report_user123.xlsx
      [Excel file attached in Discord]
 ```
 
-#### 2. **Web Search Server** (`mcp_manager.py:search_price`)
+#### 2. **Web Search Integration** (`mcp_manager.py:search_price`) ✅ TRUE MCP
+
+**Implementation Type:** External MCP server via Model Context Protocol
 
 **Capabilities:**
-- Price lookup for common items (laptop, iPhone, PS5, etc.)
-- Returns price ranges: minimum, maximum, average
+- Real-time web search for current prices
+- Searches actual Indonesian e-commerce and price listing sites
+- Returns comprehensive search results with pricing information
 - Integrated with purchase analysis intent
 - Automatic fallback when price not specified
 
 **Current Implementation:**
-- Simulated price database (educational purposes)
-- Fast, reliable responses
-- No external API dependencies
+- **TRUE MCP Integration** using `web-search-mcp` server
+- External Node.js process communication via stdio
+- Playwright-based web content extraction
+- Real search results from the internet
 
 **Technical Implementation:**
 ```python
 async def search_price(self, item_name: str):
-    # Simulated price database
-    price_db = {
-        "laptop": {"min": 3000000, "max": 25000000, "avg": 8000000},
-        "iphone": {"min": 8000000, "max": 25000000, "avg": 15000000},
-        # ... more items
-    }
+    # Initialize MCP client connection to external server
+    await self._init_web_search_client()
 
-    # Search with case-insensitive partial matching
-    for key, value in price_db.items():
-        if key in item_name.lower():
-            return {"success": True, "price_range": value, ...}
+    # Call the MCP tool via Model Context Protocol
+    result = await self._web_search_session.call_tool(
+        "full-web-search",
+        arguments={
+            "query": f"{item_name} harga Indonesia price",
+            "limit": limit,
+            "includeContent": True
+        }
+    )
+
+    # Process and format search results
+    return structured_search_data
 ```
 
 **User Experience:**
@@ -853,7 +869,9 @@ Bot: [Automatically searches price online]
      ❌ Belum mampu. Butuh 6.7 bulan nabung...
 ```
 
-#### 3. **Database Tools Server** (`mcp_manager.py:analyze_spending_trends`)
+#### 3. **Analytics Features** (`mcp_manager.py:analyze_spending_trends`) ❌ Local Utility
+
+**Implementation Type:** Local data processing (NOT an MCP server)
 
 **Capabilities:**
 - Monthly spending trend analysis
@@ -864,6 +882,7 @@ Bot: [Automatically searches price online]
 **Technical Implementation:**
 ```python
 def analyze_spending_trends(self, transactions: List[Dict]):
+    # Direct pandas DataFrame operations (NOT MCP)
     df = pd.DataFrame(transactions)
     df['date'] = pd.to_datetime(df['date'])
     df['month'] = df['date'].dt.to_period('M')
@@ -893,7 +912,9 @@ Bot: 📊 **Analisis Tren Pengeluaran:**
      💡 Insight: Pengeluaran bulan ini naik dibanding bulan lalu
 ```
 
-#### 4. **Calendar/Reminder Server** (`mcp_manager.py:add_reminder/get_reminders`)
+#### 4. **Reminder Features** (`mcp_manager.py:add_reminder/get_reminders`) ❌ Local Utility
+
+**Implementation Type:** Local JSON file storage (NOT an MCP server)
 
 **Capabilities:**
 - Create reminders for bills and budget reviews
@@ -915,7 +936,7 @@ def add_reminder(self, user_id: str, reminder_text: str,
         parsed_date = datetime(now.year, now.month, day)
         # Auto-calculate next month if past
 
-    # Store in JSON file per user
+    # Store in JSON file (NOT MCP)
     self.reminders[user_id].append({
         "id": reminder_id,
         "text": reminder_text,
@@ -923,6 +944,7 @@ def add_reminder(self, user_id: str, reminder_text: str,
         "category": category,
         "completed": False
     })
+    self._save_reminders()  # Write to reminders.json
 ```
 
 **User Experience:**
@@ -968,64 +990,74 @@ if any(keyword in message_lower for keyword in ["ekspor", "export", "laporan"]):
 - Fast (no LLM call needed for obvious keywords)
 - Supports Indonesian and English
 
-### MCP vs Direct Implementation
+### Implementation Summary Table
 
-**Why use MCP instead of hardcoding features?**
-
-| Aspect | Hardcoded | MCP Approach |
-|--------|-----------|--------------|
-| **Extensibility** | Add code for each feature | Add new tool, LLM learns it |
-| **Maintenance** | Modify bot_core.py | Isolated in mcp_manager.py |
-| **Testing** | Test entire flow | Test MCP tools independently |
-| **Reusability** | Tied to this bot | MCP tools portable |
-| **Industry Standard** | Custom | Anthropic MCP standard |
-| **Future-Proof** | Rigid | Easy to swap tools |
+| Feature | Type | Technology | Why This Approach? |
+|---------|------|------------|-------------------|
+| **File Export** | ❌ Local Utility | pandas + openpyxl | Simple, reliable, no external dependencies |
+| **Web Search** | ✅ TRUE MCP | web-search-mcp server | Real-time data, demonstrates MCP protocol |
+| **Analytics** | ❌ Local Utility | pandas DataFrames | Fast, sufficient for analysis needs |
+| **Reminders** | ❌ Local Utility | JSON file storage | Simple persistence, multi-user support |
 
 ### Agent Complexity Demonstration
 
 **Assessment Criteria #2: Agent Complexity**
 
-MCP Integration significantly increases complexity:
+Enhanced Features significantly increase agent complexity:
 
-1. **Multi-Tool Orchestration**: Bot coordinates between LLM, database, and 4 MCP tools
-2. **Async Processing**: Handles async operations for web search
-3. **File System Integration**: Creates, manages, and uploads files
-4. **Data Processing**: Uses pandas for analytics
-5. **State Management**: Reminder persistence across sessions
+1. **Multi-Tool Orchestration**: Bot coordinates between LLM, database, and 4 enhanced features (1 MCP + 3 local utilities)
+2. **Async Processing**: Handles async operations for TRUE MCP web search
+3. **File System Integration**: Creates, manages, and uploads files via pandas/openpyxl
+4. **Data Processing**: Advanced analytics using pandas DataFrames
+5. **State Management**: Reminder persistence across sessions via JSON
+6. **External System Integration**: Real MCP communication with web-search-mcp server via stdio
 
 **Complexity Metrics:**
 
-| Component | Lines of Code | Complexity |
-|-----------|---------------|------------|
-| MCP Manager | 490 | High |
-| Intent Detection | 50 (hybrid) | Medium |
-| File Generation | 150 | High |
-| Analytics | 80 | Medium |
-| Reminders | 120 | Medium |
+| Component | Lines of Code | Implementation Type | Complexity |
+|-----------|---------------|---------------------|------------|
+| Enhanced Features Manager | 842 | Mixed (1 MCP + 3 utilities) | High |
+| Web Search (MCP) | 180 | TRUE MCP via stdio | Very High |
+| File Export | 150 | Local pandas/openpyxl | Medium |
+| Analytics | 80 | Local pandas | Medium |
+| Reminders | 160 | Local JSON | Medium |
 
-### Why Simulated Web Search?
+### TRUE MCP Integration: Web Search
 
-**Current**: Simulated price database
-**Future**: Real API integration (Google Shopping, Tokopedia)
+**Current Implementation:** Real web search via external MCP server
 
-**Rationale for Simulation:**
-- ✅ Demonstrates MCP capability (assessment requirement)
-- ✅ Reliable for demos (no API failures)
-- ✅ No external costs or dependencies
-- ✅ Fast responses (<50ms)
-- ✅ Educational value clear
+**Technical Details:**
+- Uses `web-search-mcp` server (Node.js process)
+- Communication via stdio (Model Context Protocol)
+- Playwright-based web scraping
+- Returns actual search results from the internet
 
-**Upgrade Path:**
+**Why TRUE MCP for Web Search:**
+- ✅ Demonstrates real MCP protocol implementation
+- ✅ Provides actual real-time price data
+- ✅ Follows Anthropic MCP standard
+- ✅ Extensible to other MCP tools
+- ✅ Industry-standard approach
+
+**MCP Client Code:**
 ```python
-# Easy to swap simulation for real API
-async def search_price(self, item_name: str):
-    # Replace this:
-    result = price_db.get(item_name)
+# Initialize stdio connection to MCP server
+server_params = StdioServerParameters(
+    command="node",
+    args=[self.web_search_mcp_path],
+    env=None
+)
 
-    # With this:
-    async with httpx.AsyncClient() as client:
-        response = await client.get(f"https://api.example.com/search?q={item_name}")
-        result = parse_api_response(response)
+# Create MCP session
+stdio_transport = stdio_client(server_params)
+read, write = await stdio_transport.__aenter__()
+self._web_search_session = ClientSession(read, write)
+
+# Call MCP tool
+result = await self._web_search_session.call_tool(
+    "full-web-search",
+    arguments={"query": search_query, ...}
+)
 ```
 
 ---

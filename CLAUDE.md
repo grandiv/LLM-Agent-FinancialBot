@@ -10,17 +10,17 @@ The bot operates through Discord integration or CLI mode for testing, using Open
 
 ## Architecture
 
-Four-layer architecture with MCP integration:
+Four-layer architecture with enhanced features:
 1. **Interface Layer**: Discord bot (`bot.py`) or CLI runner (`cli_runner.py`)
 2. **Core Layer**: Orchestration logic (`core/bot_core.py`) - routes intents to handlers
 3. **Service Layer**:
    - `core/llm_agent.py` - OpenRouter API integration with conversation memory
    - `core/database.py` - SQLite data persistence
    - `core/prompts.py` - System prompts and function calling schemas
-   - `core/mcp_manager.py` - **NEW: Model Context Protocol manager for enhanced capabilities**
-4. **MCP Tools Layer**: File system, web search, analytics, and calendar integrations
+   - `core/mcp_manager.py` - **NEW: Enhanced features manager (file export, analytics, reminders, web search)**
+4. **Enhanced Features Layer**: File system operations, web search, analytics, and calendar features
 
-Key flow: User message → LLM Agent (intent extraction via function calling or JSON parsing) → Bot Core (intent routing) → Database/MCP operations → Response generation
+Key flow: User message → LLM Agent (intent extraction via function calling or JSON parsing) → Bot Core (intent routing) → Database/Enhanced features → Response generation
 
 ## Development Commands
 
@@ -73,11 +73,11 @@ The bot uses a function-calling or JSON-based intent classification system. All 
 - `purchase_analysis` - Analyze affordability of item (with optional web price lookup)
 - `delete_transaction` - Remove transaction by ID
 
-**MCP-Enhanced Intents (NEW):**
-- `export_report` - Export financial data to CSV/Excel (requires format: "csv" or "excel")
-- `search_price` - Search current market prices online (requires item_name)
-- `analyze_trends` - Advanced spending trend analysis with pandas
-- `set_reminder` - Create bill/budget reminders (requires reminder_text, due_date)
+**Enhanced Feature Intents (NEW):**
+- `export_report` - Export financial data to CSV/Excel files (requires format: "csv" or "excel")
+- `search_price` - Real-time web price search using web-search-mcp server (requires item_name)
+- `analyze_trends` - Advanced spending trend analysis using pandas (local processing)
+- `set_reminder` - Create bill/budget reminders with JSON storage (requires reminder_text, due_date)
 - `view_reminders` - List all active reminders
 - `complete_reminder` - Mark reminder as done (requires reminder_id)
 
@@ -151,39 +151,54 @@ Tests use `unittest.mock` to mock OpenAI client responses. See `tests/test_llm_a
 ### Adding New Categories
 Categories are pre-populated in `database.py` init. To add: insert into categories table or modify `default_categories` list and recreate database.
 
-## MCP Integration (Model Context Protocol)
+## Enhanced Features Architecture
 
-The bot uses MCP to provide enhanced capabilities beyond basic LLM chat:
+The bot provides enhanced capabilities beyond basic LLM chat through `MCPManager` class:
 
-**1. File System Server** (`mcp_manager.py:export_to_csv/excel`):
-- Exports transaction history to CSV or Excel
+**1. File Export Features** (`mcp_manager.py:export_to_csv/excel`):
+- **Implementation**: Local file operations using pandas + openpyxl
+- **NOT an MCP server**: Direct Python file I/O
+- Exports transaction history to CSV or Excel formats
 - Excel exports include 3 sheets: Transactions, Summary, Categories
 - Files saved to `exports/` directory
 
-**2. Web Search Server** (`mcp_manager.py:search_price`):
-- **Real-time web search** using `web-search-mcp` server (https://github.com/mrkrsl/web-search-mcp)
+**2. Web Search Integration** (`mcp_manager.py:search_price`):
+- **TRUE MCP Integration**: Uses external `web-search-mcp` server (https://github.com/mrkrsl/web-search-mcp)
+- Real-time web search via Model Context Protocol
 - Searches the web for actual current prices in Indonesian context
 - Uses Playwright-based content extraction for accurate results
 - Returns full search results with pricing information
 - Auto-integrated with `purchase_analysis` intent when price not specified
 - Configurable via `WEB_SEARCH_MCP_PATH` environment variable
 
-**3. Database Tools Server** (`mcp_manager.py:analyze_spending_trends`):
-- Uses pandas for advanced analytics
-- Monthly spending trends
+**3. Analytics Features** (`mcp_manager.py:analyze_spending_trends`):
+- **Implementation**: Local analytics using pandas DataFrame operations
+- **NOT an MCP server**: Direct data processing
+- Monthly spending trends analysis
 - Top 5 category breakdown with percentages
 - Spending pattern insights
 
-**4. Calendar/Reminder Server** (`mcp_manager.py:add_reminder/get_reminders`):
-- JSON-based reminder storage per user
+**4. Reminder Features** (`mcp_manager.py:add_reminder/get_reminders`):
+- **Implementation**: Local JSON file storage
+- **NOT an MCP server**: Standard file I/O with JSON
+- Reminder storage per user in `reminders.json`
 - Supports full date (YYYY-MM-DD) or day-only (DD) format
 - Reminder categories and completion tracking
 - Auto-calculates next month for past dates
 
-### Adding New MCP Tools
+### MCP vs Local Implementation Summary
+
+| Feature | Implementation Type | Technology |
+|---------|-------------------|------------|
+| `export_to_excel/csv` | ❌ Local Utility | pandas + openpyxl |
+| `search_price` | ✅ **TRUE MCP** | web-search-mcp server via stdio |
+| `analyze_spending_trends` | ❌ Local Utility | pandas DataFrames |
+| `add/get/complete_reminder` | ❌ Local Utility | JSON file storage |
+
+### Adding New Enhanced Features
 1. Add method to `MCPManager` class in `core/mcp_manager.py`
 2. Add new intent to `FUNCTION_TOOLS` in `core/prompts.py`
-3. Create handler in `core/bot_core.py` (e.g., `_handle_new_tool()`)
+3. Create handler in `core/bot_core.py` (e.g., `_handle_new_feature()`)
 4. Add routing case in `process_message()` method
 5. Write tests in `tests/test_mcp_manager.py`
 
