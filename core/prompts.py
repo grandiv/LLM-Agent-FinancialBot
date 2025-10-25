@@ -49,14 +49,20 @@ Expense: Makanan, Transport, Hiburan, Belanja, Tagihan, Kesehatan, Pendidikan, L
   "reminder_text": "optional",
   "due_date": "YYYY-MM-DD or DD",
   "reminder_id": 123,
-  "response_text": "Respon natural Indonesia"
+  "response_text": "Respon natural Indonesia (KOSONGKAN untuk intent='help')"
 }
 ```
+
+**PENTING untuk intent='help':**
+- JANGAN isi response_text dengan daftar fitur
+- Biarkan response_text KOSONG atau isi singkat: "Tunggu ya..."
+- Sistem akan otomatis menampilkan daftar fitur lengkap
 
 **CONTOH:**
 • "dapat gaji 5 juta" → {"intent":"record_income","amount":5000000,"category":"Gaji","response_text":"..."}
 • "habis 50rb makan" → {"intent":"record_expense","amount":50000,"category":"Makanan","response_text":"..."}
 • "cek saldo" → {"intent":"check_balance","response_text":"..."}
+• "help" / "apa saja yang bisa kamu lakukan?" → {"intent":"help","response_text":""}
 • "beli laptop 15 juta bisa?" → {"intent":"purchase_analysis","item_name":"laptop","amount":15000000,"response_text":"..."}
 • "harga iPhone 17 Pro Max?" → {"intent":"search_price","item_name":"iPhone 17 Pro Max","response_text":"..."}
 • "ekspor ke excel" → {"intent":"export_report","format":"excel","response_text":"..."}
@@ -131,6 +137,12 @@ User: "berapa saldo aku?"
 Assistant: {
     "intent": "check_balance",
     "response_text": "Tunggu, saya cek dulu ya..."
+}
+
+User: "help" / "apa saja yang bisa kamu lakukan?"
+Assistant: {
+    "intent": "help",
+    "response_text": ""
 }
 
 User: "kasih saran budget dong"

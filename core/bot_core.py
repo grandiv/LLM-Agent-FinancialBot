@@ -422,28 +422,61 @@ class FinancialBotCore:
         return """🤖 **FinancialBot - Asisten Keuangan Pribadimu**
 
 Aku bisa bantu kamu:
+
+**📝 Manajemen Transaksi:**
 1. 💵 Mencatat pemasukan
-   Contoh: "aku dapat gaji 5 juta", "dapet bonus 1jt"
+   Contoh: "aku dapat gaji 5 juta", "dapet bonus 1jt dari freelance"
 
 2. 💸 Mencatat pengeluaran
    Contoh: "habis 50rb buat makan", "beli baju 200 ribu"
 
-3. 💰 Cek saldo
-   Contoh: "berapa saldo aku?", "cek balance"
+3. 🗑️ Hapus transaksi
+   Contoh: "hapus transaksi nomor 5", "delete transaksi 3"
 
-4. 📊 Lihat laporan
-   Contoh: "tampilkan laporan", "lihat transaksi terakhir"
+**💰 Laporan & Analisis:**
+4. 💰 Cek saldo
+   Contoh: "berapa saldo aku?", "cek balance saya"
 
-5. 💡 Saran anggaran
-   Contoh: "kasih saran budget", "gimana ngatur keuangan?"
+5. 📊 Lihat laporan keuangan
+   Contoh: "tampilkan laporan", "buatkan laporan keuangan"
 
-6. 🛍️ Analisis pembelian
-   Contoh: "aku mau beli laptop 15 juta", "mampu ga beli PS5 8jt?"
+6. 📈 Analisis tren pengeluaran
+   Contoh: "analisa pengeluaran saya", "tunjukkan trend spending"
 
-7. 🗑️ Hapus transaksi
-   Contoh: "hapus transaksi 123"
+7. 💡 Saran anggaran & tips finansial
+   Contoh: "kasih saran budget", "gimana cara nabung?"
 
-Ngobrol aja dengan natural, aku akan mengerti! 😊
+**🛍️ Pembelian & Pencarian Harga:**
+8. 🔍 Cari harga online (real-time web search)
+   Contoh: "berapa harga iPhone 15?", "cari harga laptop gaming"
+
+9. 🛍️ Analisis kemampuan beli
+   Contoh: "aku mau beli laptop 15 juta, mampu ga?", "sanggup beli PS5?"
+
+**📤 Export Data:**
+10. 📄 Export laporan ke CSV
+    Contoh: "ekspor data ke CSV", "download laporan csv"
+
+11. 📊 Export laporan ke Excel
+    Contoh: "export ke Excel", "ekspor laporan xlsx"
+
+**⏰ Reminder & Pengingat:**
+12. ⏰ Buat pengingat tagihan
+    Contoh: "ingatkan bayar listrik tanggal 25", "reminder bayar internet tgl 5"
+
+13. 📋 Lihat semua reminder
+    Contoh: "tampilkan reminder", "lihat pengingat saya"
+
+14. ✅ Tandai reminder selesai
+    Contoh: "tandai reminder 1 selesai", "complete reminder nomor 2"
+
+**💬 Chat Natural:**
+Ngobrol santai aja, aku akan mengerti maksudmu! 😊
+Tanya apa aja tentang keuangan, tips finansial, atau obrolan ringan.
+
+**Kategori yang Tersedia:**
+• Pemasukan: Gaji, Freelance, Investasi, Hadiah, Lainnya
+• Pengeluaran: Makanan, Transport, Hiburan, Belanja, Tagihan, Kesehatan, Pendidikan, Lainnya
 """
 
     # ============================================================================
