@@ -3,6 +3,7 @@
 **Pemrosesan Bahasa Alami - Kelas A | Dosen: Syukron Abu Ishaq Alfarozi, S.T., Ph.D.**
 
 **Kelompok:**
+
 - Melvin Waluyo (22/492978/TK/53972)
 - Muhammad Grandiv Lava Putra (22/493242/TK/54023)
 
@@ -13,6 +14,7 @@ Asisten keuangan pribadi berbasis AI yang menggunakan Large Language Model (LLM)
 ## 🌟 Fitur
 
 **Core Features:**
+
 - **💬 Natural Language Understanding**: Berbicara dengan bot menggunakan bahasa Indonesia yang natural, tidak perlu command khusus
 - **💵 Pencatatan Pemasukan & Pengeluaran**: Otomatis mengekstrak data transaksi dari percakapan
 - **💰 Manajemen Saldo**: Tracking real-time pemasukan, pengeluaran, dan saldo
@@ -21,8 +23,6 @@ Asisten keuangan pribadi berbasis AI yang menggunakan Large Language Model (LLM)
 - **🛍️ Analisis Pembelian**: Analisis kemampuan beli untuk item tertentu dengan rekomendasi
 - **🧠 Conversation Memory**: Bot mengingat konteks percakapan untuk interaksi yang lebih natural
 - **👥 Multi-User Support**: Setiap user memiliki data keuangan yang terisolasi
-
-**NEW - Enhanced Features:**
 - **📁 Export Reports**: Ekspor laporan keuangan ke CSV atau Excel dengan multiple sheets (local pandas utility)
 - **🔍 Real-time Price Search**: Pencarian harga barang online menggunakan TRUE MCP integration dengan web-search-mcp server
 - **📈 Advanced Analytics**: Analisis tren pengeluaran bulanan dengan pandas (local utility)
@@ -47,7 +47,7 @@ Asisten keuangan pribadi berbasis AI yang menggunakan Large Language Model (LLM)
 ┌──────────────────────────────────────────────────┐
 │ Database Layer   │  Enhanced Features (NEW!)     │
 │ (SQLite)         │  ├─ File Export (pandas util) │
-│                  │  ├─ Web Search (TRUE MCP ✅)  │
+│                  │  ├─ Web Search (MCP)          │
 │                  │  ├─ Analytics (pandas util)   │
 │                  │  └─ Reminders (JSON util)     │
 └──────────────────────────────────────────────────┘
@@ -64,8 +64,8 @@ Asisten keuangan pribadi berbasis AI yang menggunakan Large Language Model (LLM)
 ### 1. Clone Repository
 
 ```bash
-git clone <your-repo-url>
-cd ai-agent
+git clone https://github.com/grandiv/LLM-Agent-FinancialBot.git
+cd LLM-Agent-FinancialBot
 ```
 
 ### 2. Install Dependencies
@@ -101,11 +101,9 @@ DISCORD_TOKEN=your_discord_bot_token_here
 # OpenRouter API Key
 OPENROUTER_API_KEY=your_openrouter_api_key_here
 
-# Model (pilih salah satu):
-# - anthropic/claude-3-haiku (fast, affordable)
-# - meta-llama/llama-3.1-8b-instruct:free (gratis)
-# - openai/gpt-3.5-turbo (alternatif)
-OPENROUTER_MODEL=anthropic/claude-3-haiku
+WEB_SEARCH_MCP_PATH=C:\Projects\Web-Search-MCP\dist\index.js
+
+OPENROUTER_MODEL=tngtech/deepseek-r1t2-chimera:free
 
 # Database
 DATABASE_PATH=financial_bot.db
@@ -129,12 +127,6 @@ LOG_FILE=logs/bot.log
 
 - `tngtech/deepseek-r1t2-chimera:free` - **100% GRATIS**, 671B parameters, reasoning model, kualitas bagus!
 
-**Paid Models (kalau mau kualitas lebih tinggi):**
-
-- `anthropic/claude-3-haiku` - ~$0.25 per 1000 requests (fast, excellent)
-- `openai/gpt-3.5-turbo` - ~$0.50 per 1000 requests (reliable)
-- `anthropic/claude-3-sonnet` - ~$3 per 1000 requests (best quality)
-
 #### Discord Bot Token
 
 1. Kunjungi [Discord Developer Portal](https://discord.com/developers/applications)
@@ -157,6 +149,20 @@ LOG_FILE=logs/bot.log
 3. Bot Permissions: Pilih `Send Messages`, `Read Message History`, `Embed Links`
 4. Copy URL yang generated
 5. Paste di browser → Pilih server → Authorize
+
+### 5. Setup MCP web-search-mcp
+
+1. Kunjungi https://github.com/melvinwaluyo/Web-Search-MCP
+2. Clone repository ke sistem (e.g. `C:\Web-Search-MCP`)
+3. Buka terminal di folder tersebut dan jalankan
+
+```
+npm install
+npx playwright install
+npm run build
+```
+
+4. Ubah `WEB_SEARCH_MCP_PATH` pada `.env` dengan lokasi folder MCP tersebut ke `index.js` (e.g. `C:\Web-Search-MCP\dist\index.js`)
 
 ## 🎮 Running the Bot
 
@@ -384,25 +390,28 @@ Bot: Oke, saya akan analisis kemampuan kamu untuk beli laptop...
 ## 📁 Project Structure
 
 ```
-ai-agent/
+LLM-Agent-FinancialBot/
 ├── core/
 │   ├── __init__.py
-│   ├── llm_agent.py      # OpenRouter integration & conversation management
-│   ├── prompts.py        # System prompts & function calling schemas
-│   ├── bot_core.py       # Business logic & intent handlers
-│   └── database.py       # SQLite database manager
+│   ├── llm_agent.py         # Integrasi OpenRouter & conversation management
+│   ├── prompts.py           # System prompts & function calling schemas
+│   ├── bot_core.py          # Business logic & intent handlers
+│   ├── database.py          # SQLite database manager
+│   └── mcp_manager.py       # MCP
 ├── tests/
 │   ├── __init__.py
 │   ├── test_llm_agent.py    # LLM agent tests
-│   ├── test_database.py      # Database tests
-│   └── test_integration.py   # Integration tests
-├── logs/                 # Log files (auto-created)
-├── bot.py               # Discord bot entry point
-├── cli_runner.py        # CLI testing mode
-├── requirements.txt     # Python dependencies
-├── .env                 # Environment variables (create from .env.example)
-├── .env.example         # Environment template
-└── README.md           # This file
+│   ├── test_database.py     # Database tests
+│   ├── test_integration.py  # Integration tests
+│   └── test_mcp_manager.py  # MCP manager tests
+├── exports/                 # File hasil export (auto-created)
+├── logs/                    # Log files (auto-created)
+├── bot.py                   # Discord bot entry point
+├── cli_runner.py            # CLI testing mode
+├── requirements.txt         # Python dependencies
+├── .env                     # Environment variables
+├── .env.example             # Environment template
+└── README.md                # Dokumentasi user
 ```
 
 ## 🔧 Troubleshooting
@@ -429,36 +438,3 @@ source venv/bin/activate  # Mac/Linux
 # Reinstall dependencies
 pip install -r requirements.txt --force-reinstall
 ```
-
-## 🎯 Upcoming Features
-
-- [x] ~~Export laporan ke Excel/CSV~~ ✅ **DONE (Local pandas utility)**
-- [x] ~~Reminder untuk budget bulanan~~ ✅ **DONE (Local JSON storage)**
-- [x] ~~Advanced analytics & trends~~ ✅ **DONE (Local pandas utility)**
-- [x] ~~Real-time web search~~ ✅ **DONE (TRUE MCP integration via web-search-mcp)**
-- [ ] Grafik visualisasi pengeluaran (charts/graphs)
-- [ ] Multi-currency support
-- [ ] WhatsApp integration
-- [ ] Additional MCP integrations (calendar sync, bank APIs, etc.)
-
-## 📝 License
-
-MIT License - Feel free to use for learning and projects!
-
-## 👥 Contributing
-
-Contributions are welcome! Please:
-
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## 📧 Contact
-
-Untuk pertanyaan atau feedback, silakan buka issue di GitHub repository.
-
----
-
-**Made with ❤️ using Claude AI & OpenRouter**
