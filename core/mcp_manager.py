@@ -11,6 +11,8 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 import pandas as pd
 from pathlib import Path
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
 logger = logging.getLogger(__name__)
 
@@ -18,19 +20,26 @@ logger = logging.getLogger(__name__)
 class MCPManager:
     """Manager for MCP server integrations"""
 
-    def __init__(self, export_dir: str = "exports", reminders_file: str = "reminders.json"):
+    def __init__(self, export_dir: str = "exports", reminders_file: str = "reminders.json",
+                 web_search_mcp_path: str = "C:\\Projects\\web-search-mcp-v0.3.2\\dist\\index.js"):
         """
         Initialize MCP Manager
 
         Args:
             export_dir: Directory for exported files
             reminders_file: JSON file to store reminders
+            web_search_mcp_path: Path to web-search-mcp server executable
         """
         self.export_dir = Path(export_dir)
         self.export_dir.mkdir(exist_ok=True)
 
         self.reminders_file = Path(reminders_file)
         self.reminders = self._load_reminders()
+
+        # Web search MCP server configuration
+        self.web_search_mcp_path = web_search_mcp_path
+        self._web_search_session = None
+        self._web_search_client = None
 
         logger.info("MCP Manager initialized")
 
@@ -182,70 +191,385 @@ class MCPManager:
     # WEB SEARCH MCP SERVER
     # ============================================================================
 
-    async def search_price(self, item_name: str) -> Dict[str, Any]:
+    async def _init_web_search_client(self):
+        """Initialize web search MCP client connection"""
+        if self._web_search_session is not None:
+            return  # Already initialized
+
+        try:
+            logger.info(f"Initializing web-search-mcp client: {self.web_search_mcp_path}")
+
+            # Create server parameters for stdio connection
+            server_params = StdioServerParameters(
+                command="node",
+                args=[self.web_search_mcp_path],
+                env=None
+            )
+
+            # Create stdio client context
+            stdio_transport = stdio_client(server_params)
+            self._web_search_client = stdio_transport
+
+            # Initialize session
+            read, write = await stdio_transport.__aenter__()
+            self._web_search_session = ClientSession(read, write)
+            await self._web_search_session.__aenter__()
+
+            logger.info("Web search MCP client initialized successfully")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize web search MCP client: {e}", exc_info=True)
+            raise
+
+    async def _cleanup_web_search_client(self):
+        """Cleanup web search MCP client connection"""
+        try:
+            if self._web_search_session:
+                await self._web_search_session.__aexit__(None, None, None)
+                self._web_search_session = None
+
+            if self._web_search_client:
+                await self._web_search_client.__aexit__(None, None, None)
+                self._web_search_client = None
+
+            logger.info("Web search MCP client cleaned up")
+        except Exception as e:
+            logger.error(f"Error cleaning up web search client: {e}", exc_info=True)
+
+    def _extract_search_data(self, raw_results: str) -> List[Dict]:
         """
-        Search for current price of an item online (simulated)
+        Extract clean structured data from raw search results for LLM processing
+
+        Args:
+            raw_results: Raw text from web search
+
+        Returns:
+            List of dicts with title, url, and content snippets
+        """
+        import re
+
+        lines = raw_results.split('\n')
+        results = []
+        current_result = {}
+        in_content = False
+
+        for line in lines:
+            line = line.strip()
+
+            # Skip metadata
+            if any(skip in line.lower() for skip in [
+                'search completed', 'status:', 'search engine:', 'result requested',
+                'successfully extracted', 'failed:', 'results:', 'pdf:'
+            ]):
+                continue
+
+            # Detect numbered titles
+            if re.match(r'\*\*\d+\.\s+.+\*\*$', line):
+                if current_result:
+                    results.append(current_result)
+
+                # Extract clean title
+                title = re.sub(r'\*\*\d+\.\s+', '', line).rstrip('*').strip()
+                # Get text after last › or clean up domain parts
+                if '›' in title:
+                    title = title.split('›')[-1].strip()
+                else:
+                    # Remove domain/URL parts
+                    title = re.sub(r'[a-z0-9\-\.]+\.[a-z]{2,}(\s+›.*?)?', '', title)
+                    title = re.sub(r'\s+', ' ', title).strip()
+
+                current_result = {'title': title, 'content': ''}
+                in_content = False
+                continue
+
+            # Capture URL (clean it if it's a redirect)
+            if line.startswith('URL:'):
+                url = line.replace('URL:', '').strip()
+                # Clean Bing/Google redirects - extract actual URL
+                if 'bing.com/ck/a?' in url or 'google.com/url?' in url:
+                    # Try to extract real URL from redirect
+                    match = re.search(r'&u=a1([^&]+)', url)
+                    if match:
+                        import urllib.parse
+                        try:
+                            decoded = urllib.parse.unquote(match.group(1))
+                            # Decode the a1 prefix encoding
+                            url = decoded.replace('aHR0cHM6Ly', 'https://').replace('aHR0cDovL', 'http://')
+                        except:
+                            pass  # Keep original if decoding fails
+
+                if current_result:
+                    current_result['url'] = url
+                continue
+
+            # Mark content start
+            if line.startswith('**Full Content:**'):
+                in_content = True
+                continue
+
+            # Collect content (limited to keep it concise)
+            if in_content and current_result and len(current_result.get('content', '')) < 500:
+                if not line.startswith('[') and line:  # Skip [Hasil dipotong...]
+                    current_result['content'] += line + ' '
+
+        # Add last result
+        if current_result:
+            results.append(current_result)
+
+        return results
+
+    def _parse_search_results(self, raw_results: str, item_name: str) -> str:
+        """
+        Parse and format raw search results into user-friendly format
+
+        Args:
+            raw_results: Raw text from web search
+            item_name: Name of item being searched
+
+        Returns:
+            Formatted, user-friendly search results
+        """
+        import re
+
+        # Extract key information from the raw results
+        lines = raw_results.split('\n')
+
+        results = []
+        current_result = {}
+        skip_content = False
+
+        for line in lines:
+            line = line.strip()
+
+            # Skip ALL metadata and status lines
+            if any(skip in line.lower() for skip in [
+                'search completed', 'status:', 'search engine:', 'result requested',
+                'successfully extracted', 'failed:', 'results:', 'pdf:'
+            ]):
+                continue
+
+            # Detect result number lines (e.g., "**1. Title**")
+            if re.match(r'\*\*\d+\.\s+.+\*\*$', line):
+                # This is a numbered title
+                if current_result:
+                    results.append(current_result)
+
+                # Extract title (remove ** and number)
+                title = re.sub(r'\*\*\d+\.\s+', '', line).rstrip('*').strip()
+
+                # Method: Extract the ACTUAL headline (usually after the last › or at the end with 2+ spaces)
+                # Example: "KOMPAS.com   tekno.kompas.com   › gadget  Harga iPhone..."
+                # We want: "Harga iPhone..."
+
+                # First, extract source name (before first domain)
+                source = ""
+                source_match = re.match(r'([A-Z][A-Za-z0-9\s\.\-]+?)\s+[a-z0-9\-\.]+\.[a-z]{2,}', title)
+                if source_match:
+                    source = source_match.group(1).strip()
+
+                # Get the actual article title (text with 2+ consecutive capital letters or after last ›)
+                main_title = title
+                if '›' in title:
+                    # Take everything after the last ›
+                    main_title = title.split('›')[-1].strip()
+                else:
+                    # Look for the actual headline (usually has capitalization pattern)
+                    # Remove domain patterns first
+                    cleaned = re.sub(r'[a-z0-9\-\.]+\.[a-z]{2,}(\s+›\s+[a-z\s&]+)*', '', title)
+                    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+                    if cleaned:
+                        main_title = cleaned
+
+                # Final title: use source if we have it, otherwise just main title
+                if source and len(source) < 30:  # Reasonable source name length
+                    title = f"{source}: {main_title}"
+                else:
+                    title = main_title
+
+                # Cleanup and limit length (shorter for link display)
+                title = re.sub(r'\s+', ' ', title).strip()
+                if len(title) > 70:
+                    title = title[:67] + '...'
+
+                current_result = {'title': title}
+                skip_content = False
+                continue
+
+            # Capture URL lines
+            if line.startswith('URL:'):
+                url = line.replace('URL:', '').strip()
+                if current_result:
+                    current_result['url'] = url
+                continue
+
+            # Skip Description lines (they're often redundant)
+            if line.startswith('Description:'):
+                continue
+
+            # Skip separator lines
+            if line in ['---', '—']:
+                continue
+
+            # Mark start of full content
+            if line.startswith('**Full Content:**'):
+                skip_content = True  # We'll skip most content, only extract prices
+                current_result['has_content'] = True
+                continue
+
+            # Extract ONLY price information from content
+            if skip_content and current_result.get('has_content'):
+                # Look for prices in this line
+                price_matches = re.findall(r'Rp\s?[\d.,]+(?:\s?(?:juta|ribu|jutaan))?', line, re.IGNORECASE)
+                if price_matches:
+                    if 'prices' not in current_result:
+                        current_result['prices'] = []
+                    current_result['prices'].extend(price_matches[:3])  # Max 3 prices per line
+
+        # Add last result
+        if current_result:
+            results.append(current_result)
+
+        # Format output - CLEAN SUMMARY with LINKS
+        if not results:
+            return f"Maaf, tidak menemukan informasi harga untuk '{item_name}' 😔"
+
+        # Collect all prices and create summary
+        all_prices = []
+        links = []
+
+        for result in results[:5]:  # Process up to 5 results
+            title = result.get('title', '').strip()
+            prices = result.get('prices', [])
+            url = result.get('url', '')
+
+            if prices:
+                # Get unique prices from this result
+                seen = set()
+                unique_prices = []
+                for p in prices[:3]:  # Max 3 prices per source
+                    p_clean = p.strip()
+                    # Extract just the number for comparison
+                    price_num = re.sub(r'[^\d]', '', p_clean)
+                    if price_num and price_num not in seen:
+                        seen.add(price_num)
+                        unique_prices.append(p_clean)
+                        all_prices.append(price_num)
+
+                # Add to links if we have both title and prices
+                if title and unique_prices and url:
+                    # Use first price for the link
+                    links.append({
+                        'price': unique_prices[0],
+                        'title': title,
+                        'url': url
+                    })
+
+        # Calculate price range
+        if all_prices:
+            price_numbers = [int(p) for p in all_prices if p.isdigit()]
+            if price_numbers:
+                min_price = min(price_numbers)
+                max_price = max(price_numbers)
+
+                # Format prices in millions if >= 1 juta
+                def format_price(num):
+                    if num >= 1000000:
+                        juta = num / 1000000
+                        # Round to 1 decimal and remove .0 if whole number
+                        juta_rounded = round(juta, 1)
+                        if juta_rounded == int(juta_rounded):
+                            return f"Rp {int(juta_rounded)} juta"
+                        else:
+                            return f"Rp {juta_rounded} juta"
+                    else:
+                        return f"Rp {num:,}"
+
+                min_formatted = format_price(min_price)
+                max_formatted = format_price(max_price)
+
+                # Build summary
+                source_count = len(links)
+                formatted = f"Ditemukan harga **{item_name}** dari {source_count} sumber. "
+                formatted += f"Harga mulai dari **{min_formatted}** hingga **{max_formatted}**. "
+                formatted += "Perlu diingat bahwa harga dapat berbeda tergantung spesifikasi, toko, dan lokasi.\n\n"
+
+                # Add links
+                if links:
+                    formatted += "🔗 **Sumber:**\n"
+                    for link in links[:5]:  # Show max 5 links
+                        formatted += f"• {link['price']} - {link['title']}\n"
+                        formatted += f"  {link['url']}\n\n"
+
+                return formatted.strip()
+
+        # Fallback if no prices found
+        formatted = f"Ditemukan informasi tentang **{item_name}** dari {len(results)} sumber, "
+        formatted += "namun informasi harga spesifik tidak tersedia.\n\n"
+
+        if links:
+            formatted += "🔗 **Sumber:**\n"
+            for idx, result in enumerate(results[:3], 1):
+                title = result.get('title', 'Hasil Pencarian')
+                url = result.get('url', '')
+                if url:
+                    formatted += f"{idx}. {title}\n   {url}\n\n"
+
+        return formatted.strip()
+
+    async def search_price(self, item_name: str, limit: int = 3) -> Dict[str, Any]:
+        """
+        Search for current price of an item online using web-search-mcp
 
         Args:
             item_name: Name of the item to search
+            limit: Number of search results to return (default: 3)
 
         Returns:
-            Dict with price range and source information
+            Dict with search results and price information (includes raw data for LLM processing)
         """
         try:
-            # NOTE: In production, this would call actual search APIs
-            # For now, we'll simulate price lookup with common items
-
             logger.info(f"Searching price for: {item_name}")
 
-            # Simulated price database (in production, use real APIs)
-            price_db = {
-                # Electronics
-                "laptop": {"min": 3000000, "max": 25000000, "avg": 8000000},
-                "iphone": {"min": 8000000, "max": 25000000, "avg": 15000000},
-                "ps5": {"min": 7000000, "max": 9000000, "avg": 8000000},
-                "samsung": {"min": 2000000, "max": 20000000, "avg": 7000000},
-                "macbook": {"min": 12000000, "max": 35000000, "avg": 20000000},
+            # Initialize MCP client if needed
+            await self._init_web_search_client()
 
-                # Common items
-                "sepatu": {"min": 200000, "max": 3000000, "avg": 500000},
-                "baju": {"min": 50000, "max": 1000000, "avg": 200000},
-                "tas": {"min": 100000, "max": 5000000, "avg": 500000},
-                "jam": {"min": 150000, "max": 10000000, "avg": 1000000},
-                "headphone": {"min": 100000, "max": 5000000, "avg": 800000},
-            }
+            # Construct search query for price information
+            search_query = f"{item_name} harga Indonesia price"
 
-            # Search for item (case insensitive, partial match)
-            item_lower = item_name.lower()
-            found_item = None
+            # Call the full-web-search tool
+            result = await self._web_search_session.call_tool(
+                "full-web-search",
+                arguments={
+                    "query": search_query,
+                    "limit": limit,
+                    "includeContent": True,
+                    "maxContentLength": 3000  # Get more content for better LLM parsing
+                }
+            )
 
-            for key, value in price_db.items():
-                if key in item_lower or item_lower in key:
-                    found_item = (key, value)
-                    break
+            # Extract text content from result
+            if hasattr(result, 'content') and len(result.content) > 0:
+                search_text = ""
+                for content_item in result.content:
+                    if hasattr(content_item, 'text'):
+                        search_text += content_item.text + "\n"
 
-            if found_item:
-                key, price_info = found_item
+                # Extract structured data for LLM to process
+                structured_data = self._extract_search_data(search_text)
+
+                # Return raw data for LLM processing in bot_core
                 return {
                     "success": True,
                     "item": item_name,
-                    "price_range": {
-                        "min": price_info["min"],
-                        "max": price_info["max"],
-                        "avg": price_info["avg"]
-                    },
-                    "message": f"🔍 Hasil pencarian harga untuk '{item_name}':\n" +
-                              f"  • Harga terendah: Rp {price_info['min']:,.0f}\n" +
-                              f"  • Harga tertinggi: Rp {price_info['max']:,.0f}\n" +
-                              f"  • Harga rata-rata: Rp {price_info['avg']:,.0f}\n\n" +
-                              "💡 Harga bisa bervariasi tergantung spesifikasi dan toko"
+                    "raw_results": search_text,
+                    "structured_data": structured_data,
+                    "needs_llm_formatting": True
                 }
             else:
                 return {
                     "success": False,
                     "item": item_name,
-                    "message": f"🔍 Maaf, tidak menemukan informasi harga untuk '{item_name}'.\n" +
-                              "Coba sebutkan item dengan lebih spesifik (contoh: 'laptop', 'iPhone', 'PS5')"
+                    "message": f"🔍 Maaf, tidak menemukan informasi harga untuk '{item_name}' di hasil pencarian."
                 }
 
         except Exception as e:
@@ -254,6 +578,9 @@ class MCPManager:
                 "success": False,
                 "message": f"❌ Gagal mencari harga: {str(e)}"
             }
+        finally:
+            # Cleanup client after use to avoid resource leaks
+            await self._cleanup_web_search_client()
 
     # ============================================================================
     # DATABASE TOOLS MCP SERVER

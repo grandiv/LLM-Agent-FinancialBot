@@ -25,6 +25,7 @@ venv/
 env/
 ENV/
 
+check-usage.py
 # Environment Variables
 .env
 

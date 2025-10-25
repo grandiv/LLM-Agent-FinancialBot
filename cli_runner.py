@@ -15,6 +15,7 @@ if sys.platform == 'win32':
 from core.llm_agent import LLMAgent
 from core.database import DatabaseManager
 from core.bot_core import FinancialBotCore
+from core.mcp_manager import MCPManager
 
 # Load environment variables
 load_dotenv()
@@ -72,7 +73,13 @@ def main():
         model = os.getenv("OPENROUTER_MODEL", "anthropic/claude-3-haiku")
         llm_agent = LLMAgent(api_key, model)
 
-        bot_core = FinancialBotCore(llm_agent, database)
+        # Initialize MCP Manager
+        export_dir = os.getenv("MCP_EXPORT_DIR", "exports")
+        reminders_file = os.getenv("MCP_REMINDERS_FILE", "reminders.json")
+        web_search_mcp_path = os.getenv("WEB_SEARCH_MCP_PATH", "C:\\Projects\\web-search-mcp-v0.3.2\\dist\\index.js")
+        mcp_manager = MCPManager(export_dir, reminders_file, web_search_mcp_path)
+
+        bot_core = FinancialBotCore(llm_agent, database, mcp_manager)
 
         print(f"✅ Bot initialized with model: {model}")
         print(f"📦 Database: {db_path}\n")

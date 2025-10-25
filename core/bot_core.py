@@ -481,10 +481,117 @@ Ngobrol aja dengan natural, aku akan mengerti! 😊
             return "Maaf, terjadi kesalahan saat mencari harga. Coba lagi ya! 🔍"
 
         if mcp_result["success"]:
-            response = base_response + "\n\n" + mcp_result["message"] if base_response else mcp_result["message"]
-            return response
+            # Check if we need LLM formatting
+            if mcp_result.get("needs_llm_formatting"):
+                # Use LLM to intelligently format the search results
+                formatted_response = self._format_search_with_llm(
+                    item_name,
+                    mcp_result["structured_data"]
+                )
+                # For search_price, ONLY show web results, skip LLM's response_text
+                # (LLM might say "hasn't been released" based on outdated knowledge)
+                return formatted_response
+            else:
+                # Use pre-formatted message
+                response = base_response + "\n\n" + mcp_result["message"] if base_response else mcp_result["message"]
+                return response
         else:
             return mcp_result["message"]
+
+    def _format_search_with_llm(self, item_name: str, search_data: list) -> str:
+        """
+        Use LLM to intelligently parse and format search results
+
+        Args:
+            item_name: Item being searched
+            search_data: Structured search data from MCP
+
+        Returns:
+            Formatted, user-friendly search results
+        """
+        import json
+
+        # Build prompt for LLM
+        data_json = json.dumps(search_data, indent=2, ensure_ascii=False)
+
+        format_prompt = f"""Kamu mendapatkan hasil pencarian harga untuk "{item_name}". Tugasmu adalah membuat ringkasan yang bersih dan mudah dibaca.
+
+DATA PENCARIAN:
+{data_json}
+
+INSTRUKSI FORMAT:
+1. Buat ringkasan singkat: "Ditemukan harga **{item_name}** dari [jumlah] sumber. Harga mulai dari **[harga terendah]** hingga **[harga tertinggi]**."
+2. Format harga dalam jutaan jika >= 1 juta (contoh: "Rp 25 juta" bukan "Rp 25.000.000")
+3. Tambahkan disclaimer: "Perlu diingat bahwa harga dapat berbeda tergantung spesifikasi, toko, dan lokasi."
+4. List sumber dengan format:
+   🔗 **Sumber:**
+   • [Harga] - [Judul artikel singkat]
+     [URL]
+
+PENTING:
+- Ekstrak HANYA harga yang valid dalam format Rupiah (Rp)
+- Abaikan harga yang tidak masuk akal (terlalu rendah/tinggi untuk produk ini)
+- Jika URL terlalu panjang, gunakan URL asli (bukan redirect)
+- Judul maksimal 70 karakter, potong dengan "..." jika terlalu panjang
+
+Berikan response dalam format markdown yang rapi!"""
+
+        try:
+            # Call LLM with simple completion (no function calling)
+            messages = [
+                {"role": "system", "content": "Kamu adalah asisten yang memformat hasil pencarian harga menjadi format yang rapi dan mudah dibaca."},
+                {"role": "user", "content": format_prompt}
+            ]
+
+            response = self.llm.client.chat.completions.create(
+                model=self.llm.model,
+                messages=messages,
+                temperature=0.3,  # Low temperature for consistent formatting
+                max_tokens=1000
+            )
+
+            formatted_result = response.choices[0].message.content
+
+            if formatted_result and formatted_result.strip():
+                # Clean up markdown code fences if LLM added them
+                cleaned = formatted_result.strip()
+                if cleaned.startswith('```markdown'):
+                    cleaned = cleaned.replace('```markdown', '').replace('```', '').strip()
+                elif cleaned.startswith('```'):
+                    cleaned = cleaned.replace('```', '').strip()
+
+                # Remove extra notes/explanations after the main content
+                if '###' in cleaned:
+                    cleaned = cleaned.split('###')[0].strip()
+
+                return cleaned
+            else:
+                # Fallback to basic formatting
+                return self._basic_format_search(item_name, search_data)
+
+        except Exception as e:
+            logger.error(f"Error formatting with LLM: {e}", exc_info=True)
+            return self._basic_format_search(item_name, search_data)
+
+    def _basic_format_search(self, item_name: str, search_data: list) -> str:
+        """Fallback basic formatting if LLM fails"""
+        if not search_data:
+            return f"Maaf, tidak menemukan informasi harga untuk {item_name}."
+
+        result = f"Ditemukan informasi tentang **{item_name}** dari {len(search_data)} sumber:\n\n"
+        result += "🔗 **Sumber:**\n"
+
+        for idx, item in enumerate(search_data[:3], 1):
+            title = item.get('title', 'Hasil Pencarian')
+            url = item.get('url', '')
+            if len(title) > 70:
+                title = title[:67] + '...'
+            result += f"{idx}. {title}\n"
+            if url:
+                result += f"   {url}\n"
+            result += "\n"
+
+        return result.strip()
 
     def _handle_analyze_trends(self, user_id: str, result: Dict) -> str:
         """Handle analisis tren pengeluaran"""

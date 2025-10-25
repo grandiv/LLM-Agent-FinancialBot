@@ -161,9 +161,12 @@ The bot uses MCP to provide enhanced capabilities beyond basic LLM chat:
 - Files saved to `exports/` directory
 
 **2. Web Search Server** (`mcp_manager.py:search_price`):
-- Simulated price lookup for common items (laptop, iPhone, PS5, etc.)
-- Returns price ranges (min, max, avg) for purchase analysis
+- **Real-time web search** using `web-search-mcp` server (https://github.com/mrkrsl/web-search-mcp)
+- Searches the web for actual current prices in Indonesian context
+- Uses Playwright-based content extraction for accurate results
+- Returns full search results with pricing information
 - Auto-integrated with `purchase_analysis` intent when price not specified
+- Configurable via `WEB_SEARCH_MCP_PATH` environment variable
 
 **3. Database Tools Server** (`mcp_manager.py:analyze_spending_trends`):
 - Uses pandas for advanced analytics
@@ -197,3 +200,25 @@ Optional:
 - `LOG_FILE` - Log file path (default: logs/bot.log)
 - `MCP_EXPORT_DIR` - Directory for exported files (default: exports)
 - `MCP_REMINDERS_FILE` - JSON file for reminders (default: reminders.json)
+- `WEB_SEARCH_MCP_PATH` - Path to web-search-mcp server (default: C:\Projects\web-search-mcp-v0.3.2\dist\index.js)
+
+## Web Search MCP Server Setup
+
+The bot integrates with `web-search-mcp` for real-time price searching:
+
+1. **Installation** (already done):
+   ```bash
+   cd C:\Projects\web-search-mcp-v0.3.2
+   npm install
+   npx playwright install
+   npm run build
+   ```
+
+2. **Configuration**:
+   - Set `WEB_SEARCH_MCP_PATH` in `.env` to point to the built server
+   - Default: `C:\Projects\web-search-mcp-v0.3.2\dist\index.js`
+
+3. **Usage**:
+   - The bot automatically uses this server when users ask about prices
+   - Example: "berapa harga iPhone sekarang?" triggers real web search
+   - Search results include actual current prices from Indonesian websites

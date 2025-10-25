@@ -7,10 +7,12 @@ import os
 import sys
 import discord
 import logging
+import asyncio
 from dotenv import load_dotenv
 from core.llm_agent import LLMAgent
 from core.database import DatabaseManager
 from core.bot_core import FinancialBotCore
+from core.mcp_manager import MCPManager
 
 # Load environment variables
 load_dotenv()
@@ -59,8 +61,15 @@ class FinancialDiscordBot(discord.Client):
             self.llm_agent = LLMAgent(api_key, model)
             logger.info(f"LLM Agent initialized with model: {model}")
 
+            # Initialize MCP Manager
+            export_dir = os.getenv("MCP_EXPORT_DIR", "exports")
+            reminders_file = os.getenv("MCP_REMINDERS_FILE", "reminders.json")
+            web_search_mcp_path = os.getenv("WEB_SEARCH_MCP_PATH", "C:\\Projects\\web-search-mcp-v0.3.2\\dist\\index.js")
+            self.mcp_manager = MCPManager(export_dir, reminders_file, web_search_mcp_path)
+            logger.info("MCP Manager initialized with web search integration")
+
             # Initialize bot core
-            self.bot_core = FinancialBotCore(self.llm_agent, self.database)
+            self.bot_core = FinancialBotCore(self.llm_agent, self.database, self.mcp_manager)
             logger.info("Bot core initialized successfully")
 
         except Exception as e:
@@ -115,7 +124,13 @@ class FinancialDiscordBot(discord.Client):
                 user_id = str(message.author.id)
                 username = message.author.display_name
 
-                response = self.bot_core.process_message(user_id, username, content)
+                # Run bot_core.process_message in thread pool to avoid blocking
+                loop = asyncio.get_event_loop()
+                response = await loop.run_in_executor(
+                    None,
+                    self.bot_core.process_message,
+                    user_id, username, content
+                )
 
             # Check if response includes file to upload
             file_to_upload = None
