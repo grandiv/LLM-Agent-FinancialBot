@@ -4,10 +4,10 @@ Testing end-to-end flow dengan mock LLM
 """
 
 import os
-import unittest
 import tempfile
 import sys
-from unittest.mock import Mock, patch, MagicMock
+import pytest
+from unittest.mock import Mock, AsyncMock
 
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -16,11 +16,13 @@ from core.llm_agent import LLMAgent
 from core.database import DatabaseManager
 from core.bot_core import FinancialBotCore
 
-class TestIntegration(unittest.TestCase):
+class TestIntegration:
     """Integration tests untuk bot workflow"""
 
-    def setUp(self):
-        """Setup test fixtures"""
+    @pytest.fixture(autouse=True)
+    def setup_and_teardown(self):
+        """Setup and teardown test fixtures"""
+        # Setup
         # Create temporary database
         self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
         self.temp_db.close()
@@ -35,8 +37,9 @@ class TestIntegration(unittest.TestCase):
         self.user_id = "test_user_123"
         self.username = "Test User"
 
-    def tearDown(self):
-        """Cleanup"""
+        yield
+
+        # Teardown
         # Close database connection first (Windows fix)
         self.database = None
         self.bot_core = None
@@ -53,7 +56,8 @@ class TestIntegration(unittest.TestCase):
             except PermissionError:
                 pass  # Ignore if file still locked on Windows
 
-    def test_record_income_flow(self):
+    @pytest.mark.asyncio
+    async def test_record_income_flow(self):
         """Test 1: End-to-end flow untuk record income"""
         # Mock LLM response
         self.mock_llm.process_message.return_value = {
@@ -65,22 +69,23 @@ class TestIntegration(unittest.TestCase):
         }
 
         # Process message
-        response = self.bot_core.process_message(
+        response = await self.bot_core.process_message(
             self.user_id,
             self.username,
             "aku dapat gaji 5 juta"
         )
 
         # Assertions
-        self.assertIn("Pemasukan dicatat", response)
-        self.assertIn("5,000,000", response)
+        assert "Pemasukan dicatat" in response
+        assert "5,000,000" in response
 
         # Verify database
         balance = self.database.get_user_balance(self.user_id)
-        self.assertEqual(balance['income'], 5000000)
-        self.assertEqual(balance['balance'], 5000000)
+        assert balance['income'] == 5000000
+        assert balance['balance'] == 5000000
 
-    def test_record_expense_flow(self):
+    @pytest.mark.asyncio
+    async def test_record_expense_flow(self):
         """Test 2: End-to-end flow untuk record expense"""
         # Mock LLM response
         self.mock_llm.process_message.return_value = {
@@ -92,22 +97,23 @@ class TestIntegration(unittest.TestCase):
         }
 
         # Process message
-        response = self.bot_core.process_message(
+        response = await self.bot_core.process_message(
             self.user_id,
             self.username,
             "habis 50rb buat makan"
         )
 
         # Assertions
-        self.assertIn("Pengeluaran dicatat", response)
-        self.assertIn("50,000", response)
+        assert "Pengeluaran dicatat" in response
+        assert "50,000" in response
 
         # Verify database
         balance = self.database.get_user_balance(self.user_id)
-        self.assertEqual(balance['expense'], 50000)
-        self.assertEqual(balance['balance'], -50000)
+        assert balance['expense'] == 50000
+        assert balance['balance'] == -50000
 
-    def test_check_balance_flow(self):
+    @pytest.mark.asyncio
+    async def test_check_balance_flow(self):
         """Test 3: End-to-end flow untuk check balance"""
         # Add some transactions first
         self.database.add_transaction(self.user_id, self.username, "income", 5000000, "Gaji", "")
@@ -120,19 +126,20 @@ class TestIntegration(unittest.TestCase):
         }
 
         # Process message
-        response = self.bot_core.process_message(
+        response = await self.bot_core.process_message(
             self.user_id,
             self.username,
             "berapa saldo aku?"
         )
 
         # Assertions
-        self.assertIn("Ringkasan Keuangan", response)
-        self.assertIn("5,000,000", response)  # Income
-        self.assertIn("200,000", response)    # Expense
-        self.assertIn("4,800,000", response)  # Balance
+        assert "Ringkasan Keuangan" in response
+        assert "5,000,000" in response  # Income
+        assert "200,000" in response    # Expense
+        assert "4,800,000" in response  # Balance
 
-    def test_budget_advice_flow(self):
+    @pytest.mark.asyncio
+    async def test_budget_advice_flow(self):
         """Test 4: End-to-end flow untuk budget advice"""
         # Add balance
         self.database.add_transaction(self.user_id, self.username, "income", 5000000, "Gaji", "")
@@ -144,18 +151,19 @@ class TestIntegration(unittest.TestCase):
         }
 
         # Process message
-        response = self.bot_core.process_message(
+        response = await self.bot_core.process_message(
             self.user_id,
             self.username,
             "kasih saran budget dong"
         )
 
         # Assertions
-        self.assertIn("Saran Anggaran", response)
-        self.assertIn("Dana Darurat", response)
-        self.assertIn("Tabungan", response)
+        assert "Saran Anggaran" in response
+        assert "Dana Darurat" in response
+        assert "Tabungan" in response
 
-    def test_purchase_analysis_affordable(self):
+    @pytest.mark.asyncio
+    async def test_purchase_analysis_affordable(self):
         """Test 5: Purchase analysis untuk barang yang affordable"""
         # Add balance
         self.database.add_transaction(self.user_id, self.username, "income", 10000000, "Gaji", "")
@@ -169,18 +177,19 @@ class TestIntegration(unittest.TestCase):
         }
 
         # Process message
-        response = self.bot_core.process_message(
+        response = await self.bot_core.process_message(
             self.user_id,
             self.username,
             "aku mau beli laptop 2 juta"
         )
 
         # Assertions
-        self.assertIn("Analisis Pembelian", response)
-        self.assertIn("laptop", response)
-        self.assertIn("2,000,000", response)
+        assert "Analisis Pembelian" in response
+        assert "laptop" in response
+        assert "2,000,000" in response
 
-    def test_purchase_analysis_not_affordable(self):
+    @pytest.mark.asyncio
+    async def test_purchase_analysis_not_affordable(self):
         """Test 6: Purchase analysis untuk barang yang tidak affordable"""
         # Add small balance
         self.database.add_transaction(self.user_id, self.username, "income", 1000000, "Gaji", "")
@@ -194,17 +203,18 @@ class TestIntegration(unittest.TestCase):
         }
 
         # Process message
-        response = self.bot_core.process_message(
+        response = await self.bot_core.process_message(
             self.user_id,
             self.username,
             "aku mau beli laptop 5 juta"
         )
 
         # Assertions
-        self.assertIn("Belum mampu", response)
-        self.assertIn("Alternatif", response)
+        assert "Belum mampu" in response
+        assert "Alternatif" in response
 
-    def test_casual_chat_flow(self):
+    @pytest.mark.asyncio
+    async def test_casual_chat_flow(self):
         """Test 7: Casual chat flow"""
         # Mock LLM response
         self.mock_llm.process_message.return_value = {
@@ -213,16 +223,17 @@ class TestIntegration(unittest.TestCase):
         }
 
         # Process message
-        response = self.bot_core.process_message(
+        response = await self.bot_core.process_message(
             self.user_id,
             self.username,
             "halo"
         )
 
         # Assertions
-        self.assertEqual(response, "Halo! Ada yang bisa saya bantu?")
+        assert response == "Halo! Ada yang bisa saya bantu?"
 
-    def test_help_flow(self):
+    @pytest.mark.asyncio
+    async def test_help_flow(self):
         """Test 8: Help command flow"""
         # Mock LLM response
         self.mock_llm.process_message.return_value = {
@@ -231,18 +242,19 @@ class TestIntegration(unittest.TestCase):
         }
 
         # Process message
-        response = self.bot_core.process_message(
+        response = await self.bot_core.process_message(
             self.user_id,
             self.username,
             "help"
         )
 
         # Assertions
-        self.assertIn("FinancialBot", response)
-        self.assertIn("Mencatat pemasukan", response)
-        self.assertIn("Mencatat pengeluaran", response)
+        assert "FinancialBot" in response
+        assert "Mencatat pemasukan" in response
+        assert "Mencatat pengeluaran" in response
 
-    def test_error_handling(self):
+    @pytest.mark.asyncio
+    async def test_error_handling(self):
         """Test 9: Error handling ketika LLM gagal"""
         # Mock LLM error
         self.mock_llm.process_message.return_value = {
@@ -252,16 +264,17 @@ class TestIntegration(unittest.TestCase):
         }
 
         # Process message
-        response = self.bot_core.process_message(
+        response = await self.bot_core.process_message(
             self.user_id,
             self.username,
             "test message"
         )
 
         # Should return error message
-        self.assertIn("Maaf", response)
+        assert "Maaf" in response
 
-    def test_negative_balance_warning(self):
+    @pytest.mark.asyncio
+    async def test_negative_balance_warning(self):
         """Test 10: Warning muncul ketika balance negatif"""
         # Add expense without income
         self.mock_llm.process_message.return_value = {
@@ -273,14 +286,11 @@ class TestIntegration(unittest.TestCase):
         }
 
         # Process message
-        response = self.bot_core.process_message(
+        response = await self.bot_core.process_message(
             self.user_id,
             self.username,
             "habis 100rb"
         )
 
         # Should show negative balance warning
-        self.assertIn("negatif", response.lower())
-
-if __name__ == '__main__':
-    unittest.main()
+        assert "negatif" in response.lower()
