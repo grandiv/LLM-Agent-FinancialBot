@@ -1,5 +1,13 @@
 # 🤖 FinancialBot - LLM-Powered Financial Assistant
 
+**Pemrosesan Bahasa Alami - Kelas A | Dosen: Syukron Abu Ishaq Alfarozi, S.T., Ph.D.**
+
+**Kelompok:**
+- Melvin Waluyo (22/492978/TK/53972)
+- Muhammad Grandiv Lava Putra (22/493242/TK/54023)
+
+---
+
 Asisten keuangan pribadi berbasis AI yang menggunakan Large Language Model (LLM) untuk memahami bahasa Indonesia natural dan membantu mengelola keuangan Anda.
 
 ## 🌟 Fitur

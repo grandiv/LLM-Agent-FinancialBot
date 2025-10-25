@@ -45,6 +45,10 @@ logs/
 *.swo
 *~
 
+# Claude Code
+.claude/
+CLAUDE.md
+
 # OS
 .DS_Store
 Thumbs.db
@@ -57,3 +61,24 @@ htmlcov/
 # Temporary files
 *.tmp
 temp/
+
+# Project-specific generated files
+exports/
+reminders.json
+
+# Temporary test files (keep only tests/ directory)
+test_*.py
+!tests/test_*.py
+
+# Documentation drafts (keep only README.md, REPORT.md, CLAUDE.md, ASSIGNMENT_DESCRIPTION.md)
+*_SUMMARY.md
+*_FIX.md
+*_PLAN.md
+*_SLIDES.md
+*_CHECKLIST.md
+*_GUIDE.md
+*_REVIEW.md
+BUGFIX_*.md
+FORMATTED_*.md
+QUICK_START.md
+SOLUTION.md
