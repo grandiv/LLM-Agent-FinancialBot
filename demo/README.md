@@ -40,10 +40,12 @@ Bot menyediakan menu bantuan lengkap yang menjelaskan semua fitur yang tersedia.
 - Reminder (buat, lihat, selesaikan)
 - Percakapan natural tentang keuangan
 
-![Help Command Part 1](01_help_command_1.png)
+![Help Command Part 1](screenshots/01_help_command_1.png)
+
 *Bagian pertama dari menu bantuan menampilkan daftar lengkap fitur utama bot*
 
-![Help Command Part 2](01_help_command_2.png)
+![Help Command Part 2](screenshots/01_help_command_2.png)
+
 *Bagian kedua menampilkan kategori pemasukan dan pengeluaran yang tersedia*
 
 ---
@@ -61,7 +63,8 @@ Bot dapat mencatat pemasukan dari berbagai sumber dengan otomatis mengekstrak ju
 - Kategori: Gaji
 - Deskripsi: pekerjaan utama
 
-![Record Income](02_record_income.png)
+![Record Income](screenshots/02_record_income.png)
+
 *Bot berhasil mencatat pemasukan gaji dengan konfirmasi detail transaksi*
 
 ### Mencatat Pemasukan Freelance
@@ -73,7 +76,8 @@ Bot dapat mencatat pemasukan dari berbagai sumber dengan otomatis mengekstrak ju
 - Kategori: Freelance
 - Deskripsi: project web
 
-![Record Income Freelance](03_record_income_freelance.png)
+![Record Income Freelance](screenshots/03_record_income_freelance.png)
+
 *Pencatatan pemasukan dari pekerjaan freelance dengan kategori yang sesuai*
 
 ---
@@ -88,7 +92,8 @@ Bot mendukung berbagai kategori pengeluaran dan dapat memahami konteks dari inpu
 
 **Kategori:** Makanan
 
-![Record Expense Food](04_record_expense_food.png)
+![Record Expense Food](screenshots/04_record_expense_food.png)
+
 *Pencatatan pengeluaran untuk makanan dengan detail lengkap*
 
 ### Pengeluaran Transportasi
@@ -97,7 +102,8 @@ Bot mendukung berbagai kategori pengeluaran dan dapat memahami konteks dari inpu
 
 **Kategori:** Transport
 
-![Record Expense Transport](05_record_expense_transport.png)
+![Record Expense Transport](screenshots/05_record_expense_transport.png)
+
 *Pencatatan biaya transportasi online ke kantor*
 
 ### Pengeluaran Hiburan
@@ -106,7 +112,8 @@ Bot mendukung berbagai kategori pengeluaran dan dapat memahami konteks dari inpu
 
 **Kategori:** Hiburan
 
-![Record Expense Entertainment](06_record_expense_entertainment.png)
+![Record Expense Entertainment](screenshots/06_record_expense_entertainment.png)
+
 *Pencatatan pengeluaran untuk hiburan seperti nonton film*
 
 ### Pengeluaran Tagihan
@@ -115,7 +122,8 @@ Bot mendukung berbagai kategori pengeluaran dan dapat memahami konteks dari inpu
 
 **Kategori:** Tagihan
 
-![Record Expense Bills](07_record_expense_bills.png)
+![Record Expense Bills](screenshots/07_record_expense_bills.png)
+
 *Pencatatan pembayaran tagihan listrik bulanan*
 
 ---
@@ -132,7 +140,8 @@ Bot dapat menampilkan ringkasan saldo terkini dengan detail total pemasukan, pen
 - Saldo saat ini
 - Ringkasan per kategori
 
-![Check Balance](08_check_balance.png)
+![Check Balance](screenshots/08_check_balance.png)
+
 *Ringkasan saldo lengkap dengan breakdown pemasukan dan pengeluaran*
 
 ---
@@ -149,7 +158,8 @@ Menghasilkan laporan keuangan detail yang mencakup semua transaksi, breakdown pe
 - Daftar transaksi lengkap dengan ID
 - Total dan saldo
 
-![Financial Report](09_financial_report.png)
+![Financial Report](screenshots/09_financial_report.png)
+
 *Laporan keuangan komprehensif dengan semua detail transaksi*
 
 ---
@@ -166,7 +176,8 @@ Bot menggunakan AI untuk menganalisis pola keuangan pengguna dan memberikan sara
 - Tips penghematan
 - Target tabungan
 
-![Budget Advice](10_budget_advice.png)
+![Budget Advice](screenshots/10_budget_advice.png)
+
 *Saran budget AI yang dipersonalisasi berdasarkan riwayat transaksi pengguna*
 
 ---
@@ -183,7 +194,8 @@ Bot dapat menganalisis apakah pengguna mampu membeli suatu barang berdasarkan sa
 - Rekomendasi dan pertimbangan
 - Saran alternatif jika perlu
 
-![Purchase Analysis Laptop](11_purchase_analysis_laptop.png)
+![Purchase Analysis Laptop](screenshots/11_purchase_analysis_laptop.png)
+
 *Analisis kemampuan beli laptop senilai 15 juta dengan rekomendasi detail*
 
 ---
@@ -202,7 +214,8 @@ Bot terintegrasi dengan web search untuk mencari harga barang secara real-time d
 - Harga pasar Indonesia
 - Waktu respons 15-30 detik
 
-![Web Search Price](12_web_search_price.png)
+![Web Search Price](screenshots/12_web_search_price.png)
+
 *Hasil pencarian harga iPhone 15 dari web dengan informasi harga aktual*
 
 ### Analisis Pembelian dengan Web Search
@@ -216,14 +229,16 @@ Bot dapat menggabungkan pencarian harga web dengan analisis kemampuan beli secar
 2. Menganalisis kemampuan beli berdasarkan saldo
 3. Memberikan rekomendasi
 
-![Purchase Analysis with Search](13_purchase_analysis_with_search.png)
+![Purchase Analysis with Search](screenshots/13_purchase_analysis_with_search.png)
+
 *Kombinasi pencarian harga web dan analisis kemampuan beli dalam satu respons*
 
 ### Web Search lalu Purchase Analysis
 
 **Perintah:** Pertama mencari harga, lalu analisis pembelian
 
-![Web Search then Purchase](27_web_search_then_purchase.png)
+![Web Search then Purchase](screenshots/27_web_search_then_purchase.png)
+
 *Alur lengkap dari pencarian harga hingga analisis pembelian*
 
 ---
@@ -240,7 +255,8 @@ Bot menggunakan pandas untuk menganalisis pola pengeluaran dan memberikan insigh
 - Pola dan insight pengeluaran
 - Rekomendasi berdasarkan tren
 
-![Spending Trends](14_spending_trends.png)
+![Spending Trends](screenshots/14_spending_trends.png)
+
 *Analisis tren pengeluaran dengan breakdown kategori dan insight*
 
 ---
@@ -258,7 +274,8 @@ Bot menyediakan fitur export data transaksi ke format CSV dan Excel untuk analis
 - Format: `financial_report_user{id}_{date}.csv`
 - Berisi semua transaksi
 
-![Export CSV](15_export_csv.png)
+![Export CSV](screenshots/15_export_csv.png)
+
 *Konfirmasi export data ke format CSV dengan path file*
 
 ### Export ke Excel
@@ -271,12 +288,14 @@ Bot menyediakan fitur export data transaksi ke format CSV dan Excel untuk analis
   2. Summary - Ringkasan keuangan
   3. Categories - Breakdown per kategori
 
-![Export Excel](16_export_excel.png)
+![Export Excel](screenshots/16_export_excel.png)
+
 *Konfirmasi export data ke format Excel dengan multi-sheet*
 
 ### Tampilan File Excel
 
-![Excel File](16b_excel_file.png)
+![Excel File](screenshots/16b_excel_file.png)
+
 *Preview file Excel yang diexport menampilkan sheet Transactions dengan data lengkap*
 
 ---
@@ -294,7 +313,8 @@ Bot menyediakan sistem reminder untuk membantu pengguna mengingat pembayaran tag
 - ID reminder untuk tracking
 - Status aktif/selesai
 
-![Set Reminder](17_set_reminder.png)
+![Set Reminder](screenshots/17_set_reminder.png)
+
 *Pembuatan reminder untuk bayar internet dengan tanggal 25*
 
 ### Membuat Reminder (Tanggal Lengkap)
@@ -303,7 +323,8 @@ Bot menyediakan sistem reminder untuk membantu pengguna mengingat pembayaran tag
 
 **Format:** YYYY-MM-DD atau DD saja
 
-![Set Reminder Full Date](18_set_reminder_full_date.png)
+![Set Reminder Full Date](screenshots/18_set_reminder_full_date.png)
+
 *Reminder dengan format tanggal lengkap untuk pembayaran kartu kredit*
 
 ### Melihat Semua Reminder
@@ -315,7 +336,8 @@ Bot menyediakan sistem reminder untuk membantu pengguna mengingat pembayaran tag
 - ID, deskripsi, dan tanggal jatuh tempo
 - Status (aktif/selesai)
 
-![View Reminders](19_view_reminders.png)
+![View Reminders](screenshots/19_view_reminders.png)
+
 *Daftar lengkap semua reminder dengan detail dan status*
 
 ### Menyelesaikan Reminder
@@ -326,7 +348,8 @@ Bot menyediakan sistem reminder untuk membantu pengguna mengingat pembayaran tag
 - Reminder ditandai sebagai completed
 - Konfirmasi penyelesaian
 
-![Complete Reminder](20_complete_reminder.png)
+![Complete Reminder](screenshots/20_complete_reminder.png)
+
 *Konfirmasi penyelesaian reminder dengan ID tertentu*
 
 ---
@@ -339,7 +362,8 @@ Bot menampilkan daftar transaksi dengan ID untuk keperluan manajemen.
 
 **Perintah:** `tampilkan transaksi saya` atau `buatkan laporan keuangan`
 
-![View Transactions](21_view_transactions.png)
+![View Transactions](screenshots/21_view_transactions.png)
+
 *Daftar transaksi lengkap dengan ID untuk referensi*
 
 ### Menghapus Transaksi
@@ -351,7 +375,8 @@ Bot menampilkan daftar transaksi dengan ID untuk keperluan manajemen.
 - Konfirmasi penghapusan
 - Saldo otomatis update
 
-![Delete Transaction](22_delete_transaction.png)
+![Delete Transaction](screenshots/22_delete_transaction.png)
+
 *Konfirmasi penghapusan transaksi berdasarkan ID*
 
 ---
@@ -367,7 +392,8 @@ Bot dapat melakukan percakapan natural tentang topik keuangan dan memberikan tip
 - Memberikan saran keuangan umum
 - Respons yang natural dan friendly
 
-![Casual Chat with Memory](23_casual_chat_with_memory.png)
+![Casual Chat with Memory](screenshots/23_casual_chat_with_memory.png)
+
 *Percakapan natural dengan bot tentang tips menabung*
 
 ---
@@ -385,7 +411,8 @@ Bot memiliki memory percakapan yang memungkinkan follow-up questions dengan memp
 - Memahami konteks pertanyaan sebelumnya
 - Respons yang relevan dengan konteks
 
-![Context Conversation](24_context_conversation.png)
+![Context Conversation](screenshots/24_context_conversation.png)
+
 *Percakapan multi-turn yang menunjukkan bot mengingat konteks sebelumnya*
 
 ---
@@ -401,7 +428,8 @@ Bot dapat menangani input yang tidak valid dengan memberikan respons yang sopan 
 - Permintaan klarifikasi
 - Panduan input yang benar
 
-![Invalid Amount](25_invalid_amount.png)
+![Invalid Amount](screenshots/25_invalid_amount.png)
+
 *Error handling untuk input jumlah yang tidak valid*
 
 ---
@@ -420,7 +448,8 @@ Bot dapat menganalisis skenario pembelian yang lebih kompleks seperti cicilan.
 - Dampak jangka panjang
 - Rekomendasi detail
 
-![Complex Purchase](26_complex_purchase.png)
+![Complex Purchase](screenshots/26_complex_purchase.png)
+
 *Analisis pembelian kompleks dengan cicilan dan pertimbangan jangka panjang*
 
 ---
@@ -437,10 +466,12 @@ Bot memiliki test suite komprehensif yang memastikan semua fitur bekerja dengan 
 
 **Total:** 53 test cases, semua PASSED ✅
 
-![Test Cases Part 1](28_test_cases_1.png)
+![Test Cases Part 1](screenshots/28_test_cases_1.png)
+
 *Hasil test suite bagian 1 menampilkan tests untuk database, integration, dan LLM agent*
 
-![Test Cases Part 2](28_test_cases_2.png)
+![Test Cases Part 2](screenshots/28_test_cases_2.png)
+
 *Hasil test suite bagian 2 menampilkan tests untuk MCP manager dengan 100% pass rate*
 
 **Waktu eksekusi:** 13.86 detik untuk 53 tests
