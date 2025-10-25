@@ -35,8 +35,9 @@ check-usage.py
 *.sqlite3
 
 # Logs
-logs/
-*.log
+logs/*.log
+logs/*.txt
+logs/bot.log
 
 # IDE
 .vscode/
