@@ -286,15 +286,31 @@ class MCPManager:
             if line.startswith('URL:'):
                 url = line.replace('URL:', '').strip()
                 # Clean Bing/Google redirects - extract actual URL
-                if 'bing.com/ck/a?' in url or 'google.com/url?' in url:
+                if 'bing.com/ck/a?' in url or 'bing.com/ck/a&' in url or 'google.com/url?' in url:
                     # Try to extract real URL from redirect
-                    match = re.search(r'&u=a1([^&]+)', url)
+                    match = re.search(r'[?&]u=a1([^&]+)', url)
                     if match:
                         import urllib.parse
+                        import base64
                         try:
-                            decoded = urllib.parse.unquote(match.group(1))
-                            # Decode the a1 prefix encoding
-                            url = decoded.replace('aHR0cHM6Ly', 'https://').replace('aHR0cDovL', 'http://')
+                            encoded = match.group(1)
+                            # First, URL decode
+                            decoded = urllib.parse.unquote(encoded)
+
+                            # Try full base64 decoding
+                            try:
+                                # Bing uses base64 encoding for URLs
+                                # Add padding if needed (base64 strings should be multiples of 4)
+                                padding = 4 - (len(decoded) % 4)
+                                if padding and padding != 4:
+                                    decoded += '=' * padding
+
+                                base64_decoded = base64.b64decode(decoded).decode('utf-8')
+                                if base64_decoded.startswith('http://') or base64_decoded.startswith('https://'):
+                                    url = base64_decoded
+                            except Exception:
+                                # Base64 decoding failed, URL likely not base64 encoded
+                                pass
                         except:
                             pass  # Keep original if decoding fails
 
