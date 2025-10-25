@@ -15,7 +15,8 @@
       "Bash(python:*)",
       "Bash(LOG_LEVEL=DEBUG PYTHONIOENCODING=utf-8 python:*)",
       "Bash(LOG_LEVEL=INFO PYTHONIOENCODING=utf-8 python:*)",
-      "Bash(git restore:*)"
+      "Bash(git restore:*)",
+      "Bash(node --version:*)"
     ],
     "deny": [],
     "ask": []

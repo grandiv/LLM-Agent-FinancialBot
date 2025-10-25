@@ -89,6 +89,24 @@ class FinancialDiscordBot(discord.Client):
         print(f'✅ {self.user} is now online!')
         print(f'🤖 Mention @{self.user.name} to interact')
 
+    async def close(self):
+        """Called when bot is shutting down"""
+        logger.info("Bot is shutting down...")
+        print("\n🛑 Shutting down bot...")
+
+        # Cleanup MCP connections
+        try:
+            print("🧹 Cleaning up MCP servers...")
+            await self.bot_core.mcp.mcp_client.cleanup()
+            print("✅ MCP servers stopped")
+        except Exception as e:
+            logger.error(f"Error during MCP cleanup: {e}")
+            print(f"⚠️  MCP cleanup error: {e}")
+
+        # Call parent close
+        await super().close()
+        print("✅ Bot shutdown complete")
+
     async def on_message(self, message: discord.Message):
         """Handle incoming messages"""
         # Ignore bot's own messages

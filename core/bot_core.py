@@ -28,6 +28,9 @@ class FinancialBotCore:
         self.db = database
         self.mcp = mcp_manager or MCPManager()
 
+        # Store last price search per user for purchase intent
+        self.last_price_search: Dict[str, Dict] = {}  # user_id -> price_search_result
+
     async def process_message(self, user_id: str, username: str, message: str):
         """
         Proses pesan dari user dan return response
@@ -44,6 +47,9 @@ class FinancialBotCore:
             # Dapatkan data keuangan user untuk context
             balance_data = self.db.get_user_balance(user_id)
             recent_transactions = self.db.get_user_transactions(user_id, limit=3)
+
+            # Get last price search for purchase intent context
+            last_price_search = self.last_price_search.get(user_id)
 
             # Pre-process message for better intent detection
             message_lower = message.lower()
@@ -77,7 +83,8 @@ class FinancialBotCore:
                         username=username,
                         message=message,
                         balance_data=balance_data,
-                        recent_transactions=recent_transactions
+                        recent_transactions=recent_transactions,
+                        last_price_search=last_price_search
                     )
             else:
                 # Proses dengan LLM
@@ -86,7 +93,8 @@ class FinancialBotCore:
                     username=username,
                     message=message,
                     balance_data=balance_data,
-                    recent_transactions=recent_transactions
+                    recent_transactions=recent_transactions,
+                    last_price_search=last_price_search
                 )
 
             intent = result.get("intent")
@@ -111,6 +119,9 @@ class FinancialBotCore:
             elif intent == "purchase_analysis":
                 return self._handle_purchase_analysis(user_id, result, balance_data)
 
+            elif intent == "purchase_item":
+                return self._handle_purchase_item(user_id, username, result)
+
             elif intent == "delete_transaction":
                 return self._handle_delete_transaction(user_id, result)
 
@@ -118,8 +129,11 @@ class FinancialBotCore:
             elif intent == "export_report":
                 return self._handle_export_report(user_id, result)
 
+            elif intent == "web_search":
+                return await self._handle_web_search(result, message)
+
             elif intent == "search_price":
-                return await self._handle_search_price(result)
+                return await self._handle_search_price(result, user_id)
 
             elif intent == "analyze_trends":
                 return self._handle_analyze_trends(user_id, result)
@@ -483,6 +497,107 @@ class FinancialBotCore:
 
         return base_response + analysis
 
+    def _handle_purchase_item(self, user_id: str, username: str, result: Dict) -> str:
+        """Handle pembelian item setelah price search"""
+        base_response = result.get("response_text", "")
+
+        # Get last price search from memory
+        last_search = self.last_price_search.get(user_id)
+
+        if not last_search or not last_search.get("success"):
+            return "Maaf, saya tidak ingat kamu baru cari harga apa. Coba cari harga dulu ya dengan \"cari harga [nama barang]\" 🔍"
+
+        # Extract item details from last search
+        item_name = last_search.get("item", "barang")
+        price_range = last_search.get("price_range", {})
+        sources = last_search.get("sources", [])
+
+        # Check if user specified a source index (option number)
+        source_index = result.get("source_index")
+
+        amount = None
+        source_info = ""
+
+        if source_index is not None and sources:
+            # User chose a specific option (e.g., "mau beli yg 3")
+            try:
+                if source_index == -1:
+                    # -1 means the most expensive (last one)
+                    source_index = len(sources)
+
+                # Convert to 0-based index
+                idx = source_index - 1
+
+                if 0 <= idx < len(sources):
+                    # sources format: (price, url, title)
+                    source_data = sources[idx]
+                    amount = source_data[0]  # price
+                    source_title = source_data[2] if len(source_data) > 2 else "sumber pilihan"
+                    source_info = f" dari {source_title}"
+                else:
+                    return f"Maaf, pilihan nomor {source_index} tidak tersedia. Hanya ada {len(sources)} pilihan. 🔍"
+            except Exception as e:
+                logger.error(f"Error getting source by index: {e}")
+                amount = None
+
+        # Fallback: Check if user specified amount explicitly
+        if not amount:
+            amount = result.get("amount")
+
+        # Final fallback: use lowest price
+        if not amount or amount <= 0:
+            amount = price_range.get("min", price_range.get("avg", 0))
+
+        if amount <= 0:
+            return "Maaf, ada masalah dengan data harga. Coba cari harga lagi ya! 🔍"
+
+        # Determine category (default to Belanja)
+        category = result.get("category", "Belanja")
+
+        # Create description with source info
+        description = result.get("description", f"{item_name} (dibeli online)")
+        if source_info:
+            description = f"{item_name}{source_info}"
+
+        # Record the expense
+        success = self.db.add_transaction(
+            user_id=user_id,
+            username=username,
+            transaction_type="expense",
+            amount=amount,
+            category=category,
+            description=description
+        )
+
+        if success:
+            # Clear the last price search since it's been used
+            self.last_price_search.pop(user_id, None)
+
+            # Get updated balance
+            balance = self.db.get_user_balance(user_id)
+
+            response = f"✅ Pembelian berhasil dicatat!\n\n"
+            response += f"🛍️ Item: {item_name}\n"
+            response += f"💰 Harga: Rp {amount:,.0f}\n"
+            if source_info:
+                response += f"🔗 Dibeli{source_info}\n"
+            response += f"📁 Kategori: {category}\n"
+            response += f"📝 Keterangan: {description}\n\n"
+            response += f"💵 Saldo kamu sekarang: Rp {balance['balance']:,.0f}\n"
+
+            # Add sources if available
+            sources = last_search.get("sources", [])
+            if sources and len(sources) > 0:
+                response += f"\n🔗 Dibeli dari: "
+                # Find the source with matching price
+                matching_source = next((s for s in sources if s[0] == amount), sources[0])
+                if matching_source and len(matching_source) > 1:
+                    response += f"{matching_source[1]}"  # URL
+
+            return response
+        else:
+            return "❌ Gagal mencatat pembelian. Coba lagi ya!"
+
     def _handle_delete_transaction(self, user_id: str, result: Dict) -> str:
         """Handle penghapusan transaksi"""
         transaction_id = result.get("transaction_id")
@@ -561,7 +676,37 @@ Ngobrol aja dengan natural, aku akan mengerti! 😊
             logger.warning(f"Export failed: {mcp_result['message']}")
             return {"message": mcp_result["message"]}
 
-    async def _handle_search_price(self, result: Dict) -> str:
+    async def _handle_web_search(self, result: Dict, original_message: str = "") -> str:
+        """Handle general web search for any information"""
+        search_query = result.get("search_query", "").strip()
+        base_response = result.get("response_text", "").strip()
+
+        # If search_query is missing, try to use original message as fallback
+        if not search_query:
+            if original_message:
+                search_query = original_message
+                logger.info(f"search_query empty, using original message: {original_message}")
+            else:
+                # If still no query, return natural response asking for clarification
+                return base_response if base_response else "Hmm, saya kurang mengerti apa yang ingin kamu cari. Bisa dijelaskan lebih spesifik? 🔍"
+
+        try:
+            mcp_result = await asyncio.wait_for(
+                self.mcp.web_search(search_query),
+                timeout=30.0
+            )
+        except asyncio.TimeoutError:
+            return "Pencarian memakan waktu terlalu lama. Coba query yang lebih spesifik ya!"
+        except Exception as e:
+            logger.error(f"Error in web_search: {e}", exc_info=True)
+            return "Maaf, terjadi kesalahan saat mencari informasi. Coba lagi ya! 🔍"
+
+        if mcp_result["success"]:
+            return base_response + "\n\n" + mcp_result["message"] if base_response else mcp_result["message"]
+        else:
+            return mcp_result["message"]
+
+    async def _handle_search_price(self, result: Dict, user_id: str = None) -> str:
         """Handle pencarian harga barang online"""
         item_name = result.get("item_name", "")
         base_response = result.get("response_text", "")
@@ -584,8 +729,15 @@ Ngobrol aja dengan natural, aku akan mengerti! 😊
             logger.error(f"Error in search_price: {e}", exc_info=True)
             return "Maaf, terjadi kesalahan saat mencari harga. Coba lagi ya! 🔍"
 
+        # Store the price search result for potential purchase
+        if user_id and mcp_result.get("success"):
+            self.last_price_search[user_id] = mcp_result
+            logger.info(f"Stored price search for user {user_id}: {item_name}")
+
         if mcp_result["success"]:
             response = base_response + "\n\n" + mcp_result["message"] if base_response else mcp_result["message"]
+            # Add helpful hint about purchasing
+            response += "\n\n💡 Kalau mau beli, bilang aja \"aku mau beli\" dan saya bantu catat pengeluarannya!"
             return response
         else:
             return mcp_result["message"]

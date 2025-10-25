@@ -81,7 +81,8 @@ class LLMAgent:
 
     def process_message(self, user_id: str, username: str, message: str,
                        balance_data: Optional[Dict] = None,
-                       recent_transactions: Optional[List] = None) -> Dict:
+                       recent_transactions: Optional[List] = None,
+                       last_price_search: Optional[Dict] = None) -> Dict:
         """
         Proses pesan dari user menggunakan Ollama native API dengan prompt engineering
 
@@ -91,6 +92,7 @@ class LLMAgent:
             message: Pesan dari pengguna
             balance_data: Data saldo user (income, expense, balance)
             recent_transactions: Transaksi terakhir user
+            last_price_search: Hasil pencarian harga terakhir (untuk purchase intent)
 
         Returns:
             Dict dengan intent dan extracted data
@@ -102,7 +104,7 @@ class LLMAgent:
             if recent_transactions is None:
                 recent_transactions = []
 
-            user_context = get_user_context_prompt(balance_data, recent_transactions)
+            user_context = get_user_context_prompt(balance_data, recent_transactions, last_price_search)
 
             # Get conversation history
             history = self._get_conversation_history(user_id)
@@ -118,8 +120,9 @@ class LLMAgent:
                 "model": self.model,
                 "messages": messages,
                 "stream": False,  # We want complete response, not streaming
+                "format": "json",  # FORCE JSON output mode
                 "options": {
-                    "temperature": 0.7,
+                    "temperature": 0.3,  # Lower temperature for better instruction following
                     "num_predict": 1000,  # Max tokens to generate
                 }
             }
@@ -211,6 +214,12 @@ class LLMAgent:
 
         if "item_name" in function_args and function_args["item_name"]:
             result["item_name"] = function_args["item_name"]
+
+        if "search_query" in function_args and function_args["search_query"]:
+            result["search_query"] = function_args["search_query"]
+
+        if "source_index" in function_args and function_args["source_index"] is not None:
+            result["source_index"] = int(function_args["source_index"])
 
         if "transaction_id" in function_args and function_args["transaction_id"]:
             result["transaction_id"] = int(function_args["transaction_id"])

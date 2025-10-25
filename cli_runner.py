@@ -72,7 +72,16 @@ async def main():
 
         print(f"✅ Bot initialized with model: {model}")
         print(f"Ollama URL: {llm_agent.base_url}")
-        print(f"📦 Database: {db_path}\n")
+        print(f"📦 Database: {db_path}")
+
+        # Initialize MCP connections
+        print('🔄 Initializing MCP servers...')
+        try:
+            await bot_core.mcp.initialize_mcp()
+            print('✅ MCP servers initialized\n')
+        except Exception as e:
+            logger.warning(f'MCP initialization warning: {e}')
+            print(f'⚠️  MCP initialization completed with warnings (bot will use fallback methods)\n')
 
     except Exception as e:
         print(f"❌ Failed to initialize bot: {e}")
@@ -98,6 +107,12 @@ async def main():
             # Handle CLI commands
             if user_input.lower() in ['/quit', '/exit']:
                 print("\n👋 Terima kasih! Sampai jumpa!")
+                print("🧹 Cleaning up...")
+                try:
+                    await bot_core.mcp.mcp_client.cleanup()
+                    print("✅ MCP servers stopped")
+                except Exception as e:
+                    logger.error(f"Error during MCP cleanup: {e}")
                 break
 
             elif user_input.lower() == '/clear':
@@ -128,6 +143,12 @@ async def main():
 
         except KeyboardInterrupt:
             print("\n\n👋 Terima kasih! Sampai jumpa!")
+            print("🧹 Cleaning up...")
+            try:
+                await bot_core.mcp.mcp_client.cleanup()
+                print("✅ MCP servers stopped")
+            except Exception as e:
+                logger.error(f"Error during MCP cleanup: {e}")
             break
 
         except Exception as e:

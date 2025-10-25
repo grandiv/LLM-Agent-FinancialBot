@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 import pandas as pd
 from pathlib import Path
+import httpx
 
 from .mcp_client import MCPClientManager
 
@@ -37,6 +38,14 @@ class MCPManager:
 
         # Initialize MCP client for external servers
         self.mcp_client = MCPClientManager()
+
+        # Initialize httpx client for LLM calls
+        ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        self.llm_client = httpx.Client(base_url=ollama_base_url.rstrip("/"), timeout=60.0)
+        self.ollama_model = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+
+        # Cache for exchange rate (to avoid too many API calls)
+        self._exchange_rate_cache = {"rate": None, "timestamp": None}
 
         logger.info("MCP Manager initialized")
 
@@ -269,9 +278,817 @@ class MCPManager:
             logger.debug(f"Error cleaning URL {url}: {e}")
             return url
 
+    def _generate_price_message(self, item_name: str, prices_list: List[Dict], min_price: int, max_price: int, avg_price: int) -> str:
+        """
+        Generate natural Indonesian message based on deduplicated price results
+
+        Args:
+            item_name: Item being searched
+            prices_list: List of deduplicated price info dicts
+            min_price: Minimum price (may not be meaningful if mixed currencies)
+            max_price: Maximum price (may not be meaningful if mixed currencies)
+            avg_price: Average price (may not be meaningful if mixed currencies)
+
+        Returns:
+            Natural Indonesian message
+        """
+        try:
+            # Group prices by currency
+            grouped_by_currency = {}
+            for p in prices_list:
+                currency = p.get('currency', 'IDR')
+                if currency not in grouped_by_currency:
+                    grouped_by_currency[currency] = []
+                grouped_by_currency[currency].append(p)
+
+            # Create prompt for message generation
+            sources_text = ""
+            for currency, items in grouped_by_currency.items():
+                currency_symbol = "$" if currency == "USD" else "Rp" if currency == "IDR" else currency
+                sources_text += f"\n{currency} Prices:\n"
+                for p in items:
+                    price = p.get('price', 0)
+                    title = p.get('title', 'Unknown')
+                    url = p.get('url', 'unknown')
+                    sources_text += f"- {title} ({currency_symbol} {price:,}) dari {url}\n"
+
+            prompt = f"""Generate a natural, conversational message in Indonesian to inform the user about price search results.
+
+ITEM SEARCHED: "{item_name}"
+
+NUMBER OF SOURCES: {len(prices_list)} unique websites
+
+PRICES FOUND (BY CURRENCY):
+{sources_text}
+
+Generate a natural, friendly message in Indonesian (2-3 sentences) that:
+1. Mentions prices found with their ORIGINAL currencies (Rp for Indonesia, $ for USA, etc.)
+2. States the number of unique sources/websites
+3. If both Indonesian and international prices are found, mention both clearly
+4. Provides helpful context or advice
+
+**IMPORTANT:** State each price with its currency symbol explicitly (Rp or $). DO NOT convert.
+
+Be conversational and helpful. Don't use bullet points or structured format.
+
+Return ONLY the message text in Indonesian, nothing else."""
+
+            # Call LLM
+            payload = {
+                "model": self.ollama_model,
+                "messages": [
+                    {"role": "system", "content": "You are a helpful Indonesian shopping assistant. Generate natural, conversational messages."},
+                    {"role": "user", "content": prompt}
+                ],
+                "stream": False,
+                "options": {
+                    "temperature": 0.7,  # Slightly higher for more natural language
+                    "num_predict": 300,
+                }
+            }
+
+            resp = self.llm_client.post("/api/chat", json=payload)
+            resp.raise_for_status()
+            response_data = resp.json()
+
+            message_text = response_data.get("message", {}).get("content", "")
+
+            # Handle thinking tags
+            if "<think>" in message_text and "</think>" in message_text:
+                message_text = message_text.split("</think>")[-1].strip()
+
+            return message_text.strip()
+
+        except Exception as e:
+            logger.error(f"Error generating price message: {e}")
+            # Fallback to simple message - group by currency
+            grouped = {}
+            for p in prices_list:
+                currency = p.get('currency', 'IDR')
+                if currency not in grouped:
+                    grouped[currency] = []
+                grouped[currency].append(p.get('price', 0))
+
+            price_summary = []
+            for currency, prices in grouped.items():
+                symbol = "$" if currency == "USD" else "Rp" if currency == "IDR" else currency
+                min_p = min(prices)
+                max_p = max(prices)
+                price_summary.append(f"{symbol} {min_p:,} - {symbol} {max_p:,}")
+
+            return f"Saya menemukan {len(prices_list)} sumber harga untuk '{item_name}': {', '.join(price_summary)}."
+
+    def _extract_urls_from_search_results(self, search_text: str) -> List[Dict[str, str]]:
+        """
+        Extract URLs and titles from web search results
+
+        Args:
+            search_text: Raw search result text from MCP
+
+        Returns:
+            List of dicts with 'title' and 'url' keys
+        """
+        try:
+            import re
+            from urllib.parse import urlparse
+
+            urls = []
+            seen_domains = set()
+
+            # Pattern to match URLs in search results
+            # Search results typically have format: "Title - URL" or "Title\nURL"
+            url_pattern = r'https?://[^\s\n<>"\'\)]+[^\s\n<>"\'\)\.,;:]'
+
+            # Find all URLs
+            found_urls = re.findall(url_pattern, search_text)
+
+            for url in found_urls:
+                try:
+                    # Clean the URL
+                    cleaned_url = self._clean_redirect_url(url)
+
+                    # Parse domain
+                    parsed = urlparse(cleaned_url)
+                    domain = parsed.netloc.lower()
+
+                    # Remove www. prefix
+                    if domain.startswith("www."):
+                        domain = domain[4:]
+
+                    # Skip if we've seen this domain
+                    if domain in seen_domains:
+                        continue
+
+                    # Skip common non-content domains
+                    skip_domains = ['google.com', 'bing.com', 'duckduckgo.com', 'brave.com']
+                    if any(skip in domain for skip in skip_domains):
+                        continue
+
+                    # Try to extract title (look for text before the URL)
+                    title = domain  # Default to domain
+
+                    # Search for title in the text near the URL
+                    url_index = search_text.find(url)
+                    if url_index > 0:
+                        # Look backwards for title (up to 200 chars)
+                        start_index = max(0, url_index - 200)
+                        before_text = search_text[start_index:url_index]
+
+                        # Try to find a title-like pattern (text before newline or dash)
+                        title_match = re.search(r'([^\n]{10,150}?)[\n\-–—]', before_text[::-1])
+                        if title_match:
+                            title = title_match.group(1)[::-1].strip()
+
+                    urls.append({
+                        'url': cleaned_url,
+                        'title': title if title != domain else f"Source from {domain}",
+                        'domain': domain
+                    })
+
+                    seen_domains.add(domain)
+
+                    # Limit to 10 unique sources
+                    if len(urls) >= 10:
+                        break
+
+                except Exception as e:
+                    logger.debug(f"Failed to parse URL {url}: {e}")
+                    continue
+
+            logger.info(f"Extracted {len(urls)} unique source URLs from search results")
+            return urls
+
+        except Exception as e:
+            logger.error(f"Error extracting URLs from search results: {e}")
+            return []
+
+    def _preprocess_search_results(self, text_content: str) -> str:
+        """
+        Pre-process search results to clean redirect URLs before passing to LLM
+
+        This ensures the LLM sees actual website URLs instead of Bing redirect URLs,
+        making it easier to identify unique sources.
+
+        Args:
+            text_content: Raw search result text with Bing redirect URLs
+
+        Returns:
+            Processed text with cleaned URLs
+        """
+        try:
+            # Find all URLs in the format "URL: https://..."
+            url_pattern = r'(URL:\s*)(https?://[^\s]+)'
+
+            def replace_url(match):
+                prefix = match.group(1)  # "URL: "
+                raw_url = match.group(2)  # The URL itself
+                cleaned_url = self._clean_redirect_url(raw_url)
+
+                # Log cleaning for debugging
+                if cleaned_url != raw_url:
+                    logger.debug(f"Cleaned URL: {raw_url[:80]}... -> {cleaned_url}")
+
+                return f"{prefix}{cleaned_url}"
+
+            # Replace all URLs in the text
+            processed_text = re.sub(url_pattern, replace_url, text_content)
+
+            logger.info(f"Pre-processed search results: cleaned {len(re.findall(url_pattern, text_content))} URLs")
+
+            return processed_text
+
+        except Exception as e:
+            logger.error(f"Error pre-processing search results: {e}")
+            return text_content  # Return original on error
+
+    def _extract_prices_with_llm(self, search_result_text: str, item_name: str) -> Dict[str, Any]:
+        """
+        Use LLM to intelligently extract prices from search results
+
+        The LLM can understand context and distinguish between:
+        - Real product prices vs promotional text
+        - Bundles vs individual items
+        - Different product variants
+        - Currency formatting variations
+
+        Args:
+            search_result_text: Raw search result text from MCP
+            item_name: Item being searched
+
+        Returns:
+            Dict with extracted price information
+        """
+        try:
+            logger.info(f"Using LLM to extract prices from search results for: {item_name}")
+
+            # Pre-process search results to clean redirect URLs
+            cleaned_text = self._preprocess_search_results(search_result_text)
+
+            # Create specialized prompt for price extraction
+            price_extraction_prompt = f"""You are a price extraction assistant. Analyze the following web search results and extract accurate product prices in THEIR ORIGINAL CURRENCY.
+
+SEARCH QUERY: "{item_name}"
+
+SEARCH RESULTS:
+{cleaned_text[:15000]}
+
+INSTRUCTIONS:
+1. Identify REAL product prices (ignore promotional text, discounts descriptions, or fake numbers)
+2. Extract prices in ORIGINAL currency (Rp for Indonesia, USD for USA, etc.)
+3. **CRITICAL: Include currency field** - "IDR" for Rupiah, "USD" for US Dollars
+4. **CRITICAL: Handle decimal prices correctly**:
+   - For USD: "$249.99" → extract as 249 (round to nearest dollar)
+   - For USD: "$1,999.00" → extract as 1999 (remove cents)
+   - For IDR: "Rp 3.999.000" or "Rp 3,999,000" → extract as 3999000 (no decimals)
+   - **NEVER** extract "$249.99" as 24999 - that's wrong!
+5. Match each price with its source title and EXACT URL from the search results
+6. **IMPORTANT: Return UNIQUE sources only** - If the same website/domain appears multiple times with different prices, pick the LOWEST price for that source
+7. Group by website domain (e.g., tokopedia.com, shopee.co.id, amazon.com)
+8. Distinguish between different product variants from DIFFERENT sellers
+9. Return up to 5 UNIQUE sources with the best prices
+
+Return ONLY a JSON object in this exact format (no additional text):
+{{
+  "success": true,
+  "prices": [
+    {{"price": 25000000, "currency": "IDR", "title": "iPhone 16 Pro 256GB dari Tokopedia", "url": "https://www.tokopedia.com/apple/iphone-16-pro-256gb-natural-titanium"}},
+    {{"price": 1999, "currency": "USD", "title": "iPhone 16 Pro from Amazon USA", "url": "https://www.amazon.com/dp/B0DGHP6JXL"}},
+    {{"price": 249, "currency": "USD", "title": "AirPods Pro from Best Buy", "url": "https://www.bestbuy.com/site/apple-airpods-pro/12345"}}
+  ]
+}}
+
+PRICE EXTRACTION EXAMPLES:
+- If you see "$249.99" → extract as {{"price": 249, "currency": "USD"}}  ✅ CORRECT
+- If you see "$1,999.00" → extract as {{"price": 1999, "currency": "USD"}}  ✅ CORRECT
+- If you see "Rp 3.999.000" → extract as {{"price": 3999000, "currency": "IDR"}}  ✅ CORRECT
+- NEVER do "$249.99" → {{"price": 24999, "currency": "USD"}}  ❌ WRONG!
+
+If no valid prices found, return:
+{{
+  "success": false,
+  "reason": "Brief reason why no prices found"
+}}
+
+CRITICAL RULES:
+- NO duplicate domains (tokopedia.com should appear ONCE, not 5 times)
+- Each entry must be from a DIFFERENT website
+- **NEVER make up or generate URLs** - ONLY use URLs that EXACTLY appear in the search results above
+- If you cannot find the exact URL for a price, use empty string "" for the url field
+- ALWAYS include "currency" field ("IDR", "USD", "SGD", etc.)
+- Store price as numeric value WITHOUT currency symbols
+- Return ONLY the JSON object, nothing else.
+
+**IMPORTANT:** If you cannot find the EXACT full URL in the search results, DO NOT generate or create a URL. Use "" instead."""
+
+            # Call Ollama API
+            payload = {
+                "model": self.ollama_model,
+                "messages": [
+                    {"role": "system", "content": "You are a price extraction expert. Always return valid JSON. IMPORTANT: Extract decimal prices correctly - $249.99 is 249 USD, not 24999!"},
+                    {"role": "user", "content": price_extraction_prompt}
+                ],
+                "stream": False,
+                "options": {
+                    "temperature": 0.3,  # Lower temperature for more consistent extraction
+                    "num_predict": 1500,
+                }
+            }
+
+            logger.info(f"Calling LLM ({self.ollama_model}) for price extraction...")
+            resp = self.llm_client.post("/api/chat", json=payload)
+            resp.raise_for_status()
+            response_data = resp.json()
+
+            # Extract response text
+            response_text = response_data.get("message", {}).get("content", "")
+
+            # Handle thinking tags if present
+            if "<think>" in response_text and "</think>" in response_text:
+                response_text = response_text.split("</think>")[-1].strip()
+
+            # Parse JSON response
+            start_idx = response_text.find("{")
+            end_idx = response_text.rfind("}") + 1
+
+            if start_idx != -1 and end_idx > start_idx:
+                json_str = response_text[start_idx:end_idx]
+                llm_result = json.loads(json_str)
+
+                logger.info(f"LLM extraction result: {llm_result.get('reasoning', 'No reasoning')}")
+
+                if llm_result.get("success") and llm_result.get("prices"):
+                    prices_list = llm_result["prices"]
+
+                    # Post-process to ensure unique sources (deduplicate by domain)
+                    from urllib.parse import urlparse
+                    unique_sources = {}
+
+                    for price_info in prices_list:
+                        url = price_info.get("url", "")
+                        price = price_info.get("price", 0)
+
+                        if not url or not price:
+                            continue
+
+                        # Validate URL actually appears in search results (anti-hallucination check)
+                        if url not in cleaned_text:
+                            logger.warning(f"LLM hallucinated URL (not found in search results): {url}")
+                            # Try to find a similar URL from the search results
+                            try:
+                                parsed = urlparse(url)
+                                domain = parsed.netloc.lower()
+                                if domain.startswith("www."):
+                                    domain = domain[4:]
+
+                                # Search for any URL from this domain in the actual results
+                                import re
+                                url_pattern = rf'https?://(?:www\.)?{re.escape(domain)}[^\s\n<>"\'\)]*'
+                                found_urls = re.findall(url_pattern, cleaned_text)
+
+                                if found_urls:
+                                    # Use the first real URL from this domain
+                                    url = found_urls[0]
+                                    price_info["url"] = url
+                                    logger.info(f"Replaced hallucinated URL with real URL from same domain: {url}")
+                                else:
+                                    logger.warning(f"No real URLs found for domain {domain}, marking URL as suspicious")
+                                    # Keep the URL but mark it with a warning flag
+                                    price_info["url_verified"] = False
+                            except Exception as e:
+                                logger.error(f"Error validating URL: {e}")
+
+                        # Extract domain from URL
+                        try:
+                            parsed = urlparse(url)
+                            domain = parsed.netloc.lower()
+
+                            # Remove www. prefix for better matching
+                            if domain.startswith("www."):
+                                domain = domain[4:]
+
+                            # Keep lowest price for each domain
+                            if domain not in unique_sources or price < unique_sources[domain]["price"]:
+                                unique_sources[domain] = price_info
+                                currency = price_info.get("currency", "IDR")
+                                currency_symbol = "$" if currency == "USD" else "Rp"
+                                logger.debug(f"Added/Updated source: {domain} - {currency_symbol} {price:,}")
+                            else:
+                                currency = price_info.get("currency", "IDR")
+                                currency_symbol = "$" if currency == "USD" else "Rp"
+                                logger.debug(f"Skipped duplicate domain: {domain} - {currency_symbol} {price:,}")
+
+                        except Exception as e:
+                            logger.warning(f"Failed to parse URL {url}: {e}")
+                            # If URL parsing fails, use as-is
+                            unique_sources[url] = price_info
+
+                    # Convert back to list
+                    prices_list = list(unique_sources.values())
+
+                    logger.info(f"After deduplication: {len(prices_list)} unique sources from {len(llm_result.get('prices', []))} total")
+
+                    if prices_list:
+                        # Separate prices by currency (CRITICAL: cannot mix IDR and USD!)
+                        prices_by_currency = {}
+                        for p in prices_list:
+                            currency = p.get("currency", "IDR")
+                            if currency not in prices_by_currency:
+                                prices_by_currency[currency] = []
+                            prices_by_currency[currency].append(p.get("price", 0))
+
+                        # Calculate min/max/avg per currency
+                        price_ranges = {}
+                        for currency, price_values in prices_by_currency.items():
+                            if price_values:
+                                price_ranges[currency] = {
+                                    "min": min(price_values),
+                                    "max": max(price_values),
+                                    "avg": sum(price_values) // len(price_values)
+                                }
+                                logger.info(f"{currency} price range: {price_ranges[currency]}")
+
+                        # For backward compatibility, use IDR if available, otherwise use first currency
+                        if "IDR" in price_ranges:
+                            min_price = price_ranges["IDR"]["min"]
+                            max_price = price_ranges["IDR"]["max"]
+                            avg_price = price_ranges["IDR"]["avg"]
+                        else:
+                            first_currency = list(price_ranges.keys())[0]
+                            min_price = price_ranges[first_currency]["min"]
+                            max_price = price_ranges[first_currency]["max"]
+                            avg_price = price_ranges[first_currency]["avg"]
+
+                        # Generate natural message AFTER deduplication for consistency
+                        logger.info(f"Generating natural message for {len(prices_list)} unique sources")
+                        natural_message = self._generate_price_message(
+                            item_name=item_name,
+                            prices_list=prices_list,
+                            min_price=min_price,
+                            max_price=max_price,
+                            avg_price=avg_price
+                        )
+
+                        # Build final message with natural text + source links
+                        message = f"{natural_message}\n\n"
+
+                        # Add clickable source links
+                        if len(prices_list) > 0:
+                            message += "🔗 **Sumber:**\n"
+                            for i, price_info in enumerate(prices_list[:5], 1):
+                                price = price_info.get("price", 0)
+                                currency = price_info.get("currency", "IDR")
+                                title = price_info.get("title", "Unknown")[:70]
+                                url = price_info.get("url", "")
+
+                                # Format price with correct currency symbol
+                                if currency == "USD":
+                                    price_str = f"${price:,.0f}"
+                                elif currency == "IDR":
+                                    price_str = f"Rp {price:,.0f}"
+                                else:
+                                    price_str = f"{currency} {price:,.0f}"
+
+                                message += f"{i}. {price_str} - {title}\n"
+                                if url:
+                                    message += f"   {url}\n"
+
+                        return {
+                            "success": True,
+                            "item": item_name,
+                            "price_range": {
+                                "min": min_price,
+                                "max": max_price,
+                                "avg": avg_price
+                            },
+                            "source": "Web Search MCP + LLM",
+                            "sample_count": len(prices_list),
+                            "sources": [(p.get("price", 0), p.get("url", ""), p.get("title", "")) for p in prices_list[:5]],
+                            "message": message
+                        }
+
+                # LLM found no prices
+                reason = llm_result.get("reason", "Tidak menemukan harga yang valid")
+                no_price_message = f"Maaf, saya tidak menemukan harga untuk '{item_name}'.\n\n"
+                no_price_message += f"Alasan: {reason}\n\n"
+                no_price_message += "💡 Coba sebutkan item dengan lebih detail atau spesifik (contoh: 'iPhone 15 Pro', 'Laptop ASUS ROG')."
+
+                return {
+                    "success": False,
+                    "item": item_name,
+                    "message": no_price_message
+                }
+            else:
+                logger.warning("No JSON found in LLM response")
+                return {"success": False, "item": item_name}
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse LLM JSON response: {e}")
+            logger.debug(f"LLM response text: {response_text[:500]}")
+            return {"success": False, "item": item_name}
+        except Exception as e:
+            logger.error(f"Error in LLM price extraction: {e}", exc_info=True)
+            return {"success": False, "item": item_name}
+
+    def _get_usd_to_idr_rate(self) -> float:
+        """
+        Get real-time USD to IDR exchange rate
+        Uses cache to avoid excessive API calls (refreshes every 30 minutes)
+
+        Returns:
+            Exchange rate as float (e.g., 15700.0 means $1 = Rp 15,700)
+        """
+        try:
+            from datetime import datetime, timedelta
+
+            # Check cache (30 minutes validity)
+            if self._exchange_rate_cache["rate"] and self._exchange_rate_cache["timestamp"]:
+                age = datetime.now() - self._exchange_rate_cache["timestamp"]
+                if age < timedelta(minutes=30):
+                    logger.debug(f"Using cached exchange rate: {self._exchange_rate_cache['rate']}")
+                    return self._exchange_rate_cache["rate"]
+
+            # Fetch new rate from free API (no key required)
+            logger.info("Fetching real-time USD to IDR exchange rate...")
+
+            # Try exchangerate-api.com (free, no key required)
+            with httpx.Client(timeout=10.0) as client:
+                response = client.get("https://api.exchangerate-api.com/v4/latest/USD")
+                response.raise_for_status()
+                data = response.json()
+
+                # Extract IDR rate
+                if "rates" in data and "IDR" in data["rates"]:
+                    rate = float(data["rates"]["IDR"])
+                    logger.info(f"Fetched exchange rate: $1 = Rp {rate:,.0f}")
+
+                    # Update cache
+                    self._exchange_rate_cache["rate"] = rate
+                    self._exchange_rate_cache["timestamp"] = datetime.now()
+
+                    return rate
+                else:
+                    raise ValueError("IDR rate not found in API response")
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch exchange rate: {e}")
+            # Fallback to approximate rate
+            fallback_rate = 15700.0
+            logger.info(f"Using fallback rate: $1 = Rp {fallback_rate:,.0f}")
+            return fallback_rate
+
+    def _convert_dollars_to_rupiah(self, text: str, exchange_rate: float) -> str:
+        """
+        Pre-process text to convert all dollar amounts to Rupiah
+        Finds patterns like $799, $1,299.99, USD 1000, etc. and adds Rupiah equivalent
+
+        Args:
+            text: Text containing dollar amounts
+            exchange_rate: Current USD to IDR rate
+
+        Returns:
+            Text with Rupiah conversions added
+        """
+        try:
+            # Regex patterns for dollar amounts (order matters - more specific first)
+            # Pattern explanation: matches numbers like 799, 1199, 1,299, 10000, 10,000.99
+            patterns = [
+                (r'\$(\d+(?:,\d{3})*(?:\.\d{2})?)', 'dollar_sign'),  # $799, $1,299.99, $1199
+                (r'USD\s+(\d+(?:,\d{3})*(?:\.\d{2})?)', 'usd_prefix'),  # USD 799, USD 1199, USD 1,199
+                (r'(\d+(?:,\d{3})*(?:\.\d{2})?)\s+USD', 'usd_suffix'),  # 799 USD, 1599 USD, 1,599 USD
+            ]
+
+            converted_text = text
+
+            for pattern, pattern_type in patterns:
+                matches = re.finditer(pattern, converted_text, re.IGNORECASE)
+
+                # Process matches in reverse to avoid offset issues
+                for match in reversed(list(matches)):
+                    # Extract the numeric value
+                    amount_str = match.group(1).replace(',', '')
+                    try:
+                        amount = float(amount_str)
+
+                        # Convert to Rupiah
+                        rupiah = amount * exchange_rate
+
+                        # Format the conversion annotation
+                        if pattern_type == 'dollar_sign':
+                            # $799 → $799 (Rp 13,282,000)
+                            original = match.group(0)
+                            replacement = f"{original} (Rp {rupiah:,.0f})"
+                        elif pattern_type == 'usd_suffix':
+                            # 799 USD → 799 USD (Rp 13,282,000)
+                            original = match.group(0)
+                            replacement = f"{original} (Rp {rupiah:,.0f})"
+                        elif pattern_type == 'usd_prefix':
+                            # USD 799 → USD 799 (Rp 13,282,000)
+                            original = match.group(0)
+                            replacement = f"{original} (Rp {rupiah:,.0f})"
+
+                        # Replace in text
+                        start, end = match.span()
+                        converted_text = converted_text[:start] + replacement + converted_text[end:]
+
+                    except (ValueError, TypeError) as e:
+                        logger.debug(f"Could not convert amount '{amount_str}': {e}")
+                        continue
+
+            logger.info(f"Pre-processed text: converted {len(list(re.finditer(r'\(Rp [0-9,]+\)', converted_text)))} dollar amounts")
+            return converted_text
+
+        except Exception as e:
+            logger.error(f"Error in dollar conversion: {e}", exc_info=True)
+            return text  # Return original text if conversion fails
+
+    def _summarize_search_results(self, search_text: str, search_query: str) -> str:
+        """
+        Use LLM to summarize web search results into a helpful response
+
+        Args:
+            search_text: Raw search results from MCP
+            search_query: Original search query
+
+        Returns:
+            Natural Indonesian summary
+        """
+        try:
+            logger.info(f"Summarizing search results for: {search_query}")
+
+            # Create prompt for summarization
+            summary_prompt = f"""You are a helpful assistant. Summarize the following web search results in Indonesian.
+
+SEARCH QUERY: "{search_query}"
+
+WEB SEARCH RESULTS:
+{search_text[:10000]}
+
+**IMPORTANT - CURRENCY REPORTING:**
+State prices EXPLICITLY with their original currency:
+- Indonesian prices: Use "Rp" (e.g., "Rp 25,000,000")
+- US/International prices: Use "$" or "USD" (e.g., "$1,999" or "USD 1999")
+
+DO NOT convert currencies automatically. Let the user see the original prices.
+
+INSTRUCTIONS:
+1. Provide a clear, concise summary in Indonesian (3-5 paragraphs max)
+2. Focus on the most relevant and recent information
+3. **State each price with its currency clearly** (Rp for Indonesia, $ for USA, etc.)
+4. If multiple countries/sources are found, group them by location
+5. Be conversational and helpful
+7. Include specific details, specs, or features if relevant
+8. If results are about products, mention key differentiators
+
+Return ONLY the summary text in Indonesian, nothing else."""
+
+            # Call Ollama API
+            payload = {
+                "model": self.ollama_model,
+                "messages": [
+                    {"role": "system", "content": "You are a helpful Indonesian assistant that summarizes web search results."},
+                    {"role": "user", "content": summary_prompt}
+                ],
+                "stream": False,
+                "options": {
+                    "temperature": 0.7,
+                    "num_predict": 800,
+                }
+            }
+
+            resp = self.llm_client.post("/api/chat", json=payload)
+            resp.raise_for_status()
+            response_data = resp.json()
+
+            summary_text = response_data.get("message", {}).get("content", "")
+
+            # Handle thinking tags
+            if "<think>" in summary_text and "</think>" in summary_text:
+                summary_text = summary_text.split("</think>")[-1].strip()
+
+            return summary_text.strip() if summary_text else "Informasi ditemukan tapi gagal diproses. Coba lagi ya!"
+
+        except Exception as e:
+            logger.error(f"Error summarizing search results: {e}")
+            # Fallback: return first 1000 chars
+            return f"Hasil pencarian untuk '{search_query}':\n\n{search_text[:1000]}..."
+
     # ============================================================================
     # WEB SEARCH MCP SERVER (Bing -> Brave -> DuckDuckGo)
     # ============================================================================
+
+    async def web_search(self, search_query: str) -> Dict[str, Any]:
+        """
+        General-purpose web search for ANY information (not just prices)
+
+        Use this for:
+        - Product information and specs
+        - Reviews and comparisons
+        - News and updates
+        - General knowledge
+        - Any question that needs internet data
+
+        Args:
+            search_query: Search query in any language
+
+        Returns:
+            Dict with search results formatted for user
+        """
+        try:
+            logger.info(f"Web search: {search_query}")
+
+            # Use MCP web search if available
+            if self.mcp_client.enabled and self.mcp_client.is_connected("web-search"):
+                try:
+                    logger.info("Using Web Search MCP for general search")
+
+                    # Call MCP web search tool
+                    result = await asyncio.wait_for(
+                        self.mcp_client.web_search(
+                            query=search_query,
+                            limit=10,
+                            include_content=True
+                        ),
+                        timeout=20.0
+                    )
+
+                    # Extract text from result
+                    search_text = ""
+                    if hasattr(result, 'content'):
+                        content = result.content
+                        if isinstance(content, list) and len(content) > 0:
+                            if hasattr(content[0], 'text'):
+                                search_text = content[0].text
+                            else:
+                                search_text = str(content[0])
+                        else:
+                            search_text = str(content)
+                    else:
+                        search_text = str(result)
+
+                    # Extract URLs from search results
+                    source_urls = self._extract_urls_from_search_results(search_text)
+
+                    if search_text and len(search_text) > 50:
+                        # Let LLM summarize the search results
+                        summary = self._summarize_search_results(search_text, search_query)
+
+                        # Build message with sources
+                        message = f"🔍 **Hasil pencarian untuk '{search_query}':**\n\n{summary}"
+
+                        # Add source links if available
+                        if source_urls:
+                            message += "\n\n🔗 **Sumber:**\n"
+                            for i, url_info in enumerate(source_urls[:5], 1):
+                                title = url_info.get('title', 'Unknown')[:80]
+                                url = url_info.get('url', '')
+                                message += f"{i}. {title}\n"
+                                if url:
+                                    message += f"   {url}\n"
+                        else:
+                            message += "\n\n📊 Sumber: Web Search MCP (Bing/Brave/DuckDuckGo)"
+
+                        return {
+                            "success": True,
+                            "query": search_query,
+                            "message": message
+                        }
+                    else:
+                        logger.warning("Web search returned empty or very short results")
+                        return {
+                            "success": False,
+                            "query": search_query,
+                            "message": f"🔍 Pencarian untuk '{search_query}' tidak menemukan hasil yang cukup. Coba kata kunci yang lebih spesifik."
+                        }
+
+                except asyncio.TimeoutError:
+                    logger.warning("Web search timed out")
+                    return {
+                        "success": False,
+                        "query": search_query,
+                        "message": "Pencarian memakan waktu terlalu lama. Coba lagi dengan query yang lebih spesifik."
+                    }
+                except Exception as e:
+                    logger.error(f"MCP web search error: {e}", exc_info=True)
+                    return {
+                        "success": False,
+                        "query": search_query,
+                        "message": f"Maaf, terjadi error saat mencari informasi. Coba lagi ya!"
+                    }
+            else:
+                logger.warning("Web search MCP not available")
+                return {
+                    "success": False,
+                    "query": search_query,
+                    "message": "Web search tidak tersedia saat ini. Pastikan MCP web search sudah dikonfigurasi."
+                }
+
+        except Exception as e:
+            logger.error(f"Error in web_search: {e}", exc_info=True)
+            return {
+                "success": False,
+                "query": search_query,
+                "message": f"Terjadi kesalahan: {str(e)}"
+            }
 
     async def search_price(self, item_name: str) -> Dict[str, Any]:
         """
@@ -344,7 +1161,11 @@ class MCPManager:
 
     def _extract_prices_from_web_search(self, search_result: Any, item_name: str) -> Dict[str, Any]:
         """
-        Extract price information and URLs from Web Search MCP results
+        Extract price information from Web Search MCP results using LLM
+
+        Instead of regex patterns, this uses the LLM to intelligently understand
+        context and extract real prices while ignoring promotional text, bundles,
+        and other noise.
 
         Args:
             search_result: Raw search result from Web Search MCP
@@ -368,144 +1189,17 @@ class MCPManager:
             else:
                 text_content = str(search_result)
 
-            logger.info(f"Extracting prices from search results (length: {len(text_content)} chars)")
+            logger.info(f"Extracting prices using LLM from search results (length: {len(text_content)} chars)")
 
-            # Debug: Log first 2000 chars to understand format
-            logger.info(f"MCP result preview (first 2000 chars): {text_content[:2000]}")
+            # Use LLM for intelligent price extraction
+            result = self._extract_prices_with_llm(text_content, item_name)
 
-            # Price patterns for Indonesian Rupiah
-            price_patterns = [
-                r'Rp\s*(\d{1,3}(?:\.\d{3})+)',           # Rp 1.000.000
-                r'Rp\s*(\d+(?:,\d{3})+)',                 # Rp 1,000,000
-                r'Rp\s*(\d{7,})',                         # Rp 1000000
-                r'(?:harga|price|mulai)\s*:?\s*Rp\s*(\d{1,3}(?:\.\d{3})+)',
-                r'(?:harga|price|mulai)\s*:?\s*Rp\s*(\d+(?:,\d{3})+)',
-                r'(?:harga|price|mulai)\s*:?\s*Rp\s*(\d{7,})',
-            ]
-
-            # Extract URLs, titles, and prices from the text
-            # MCP Format: "**1. Title**\nURL: https://www.bing.com/ck/a?...&u=encoded...\nDescription: ...\n**Full Content:**\n..."
-
-            # Extract titles and URLs together - MCP format uses **Number. Title**
-            # Use [\s\S] to match any whitespace including newlines
-            title_pattern = r'\*\*(\d+)\.\s*([^\*]+?)\*\*[\s\n]+URL:\s*(https?://[^\s]+)'
-            title_url_matches = re.findall(title_pattern, text_content, re.MULTILINE)
-
-            logger.info(f"Found {len(title_url_matches)} title/URL matches")
-            if len(title_url_matches) > 0:
-                # title_url_matches now contains tuples of (number, title, url)
-                logger.info(f"First match example: #{title_url_matches[0][0]} Title='{title_url_matches[0][1].strip()[:50]}...', URL='{title_url_matches[0][2][:80]}...'")
+            if result.get("success"):
+                logger.info(f"LLM successfully extracted {result.get('sample_count', 0)} prices")
             else:
-                # Debug: show what patterns exist
-                logger.warning("No matches found. Checking for pattern components...")
-                title_only = re.findall(r'\*\*(\d+)\.\s*([^\*]+?)\*\*', text_content)
-                url_only = re.findall(r'URL:\s*(https?://[^\s]+)', text_content)
-                logger.info(f"Found {len(title_only)} titles and {len(url_only)} URLs separately")
+                logger.warning(f"LLM could not extract prices: {result.get('message', 'Unknown reason')}")
 
-            # Split content by result sections to associate prices with URLs
-            # Each result starts with **Number. Title**
-            result_sections = re.split(r'\*\*\d+\.\s*[^\*]+?\*\*', text_content)
-            logger.info(f"Split into {len(result_sections)} result sections")
-
-            price_sources = []  # List of (price, url, title) tuples
-            all_prices = []
-
-            # Extract prices from each result section and associate with URLs and titles
-            for i, (number, title, raw_url) in enumerate(title_url_matches):
-                # Clean Bing redirect URL to get actual source URL
-                url = self._clean_redirect_url(raw_url)
-
-                # Log the cleaning result
-                if url != raw_url:
-                    logger.info(f"Result {number}: Cleaned URL from Bing redirect")
-                    logger.info(f"  Before: {raw_url[:100]}...")
-                    logger.info(f"  After:  {url}")
-                else:
-                    logger.info(f"Result {number}: Direct URL (no redirect)")
-                    logger.info(f"  URL: {url}")
-
-                # Get the corresponding content section
-                if i + 1 < len(result_sections):
-                    section_content = result_sections[i + 1]
-                else:
-                    continue
-
-                # Extract prices from this section
-                section_prices = []
-                for pattern in price_patterns:
-                    matches = re.findall(pattern, section_content, re.IGNORECASE)
-                    for match in matches:
-                        price_str = match.replace('.', '').replace(',', '').replace(' ', '')
-                        try:
-                            price = int(price_str)
-                            if 1000 <= price <= 1_000_000_000:
-                                section_prices.append(price)
-                        except ValueError:
-                            continue
-
-                # Log what we found (or didn't find)
-                if section_prices:
-                    min_section_price = min(section_prices)
-                    price_sources.append((min_section_price, url, title.strip()))
-                    all_prices.extend(section_prices)
-                    logger.info(f"Result #{number}: Found {len(section_prices)} prices (min: Rp {min_section_price:,})")
-                else:
-                    # Log snippet of content for debugging
-                    logger.warning(f"Result #{number}: No prices found in section. Content preview: {section_content[:200]}...")
-
-            # Remove duplicate prices
-            all_prices = list(set(all_prices))
-
-            # Sort price sources by price (lowest first)
-            price_sources.sort(key=lambda x: x[0])
-
-            logger.info(f"Extracted {len(all_prices)} unique prices from {len(price_sources)} sources")
-
-            if all_prices:
-                min_price = min(all_prices)
-                max_price = max(all_prices)
-                avg_price = sum(all_prices) // len(all_prices)
-
-                # Build message with top 5 sources
-                message = f"🔍 **Hasil pencarian harga untuk '{item_name}'** (Real-time via Web Search):\n\n"
-                message += f"  • Harga terendah: Rp {min_price:,.0f}\n"
-                message += f"  • Harga tertinggi: Rp {max_price:,.0f}\n"
-                message += f"  • Harga rata-rata: Rp {avg_price:,.0f}\n"
-                message += f"  • Data dari {len(all_prices)} harga, {len(price_sources)} sumber\n\n"
-
-                # Add top 5 sources with titles and URLs
-                if price_sources:
-                    message += "🔗 **Sumber Harga (Top 5):**\n"
-                    for i, (price, url, title) in enumerate(price_sources[:5], 1):
-                        # Truncate title if too long
-                        display_title = title[:60] + '...' if len(title) > 60 else title
-                        message += f"{i}. Rp {price:,.0f} - **{display_title}**\n"
-                        message += f"   <{url}>\n"
-                    message += "\n"
-
-                message += "📊 Sumber: Web Search MCP (Bing -> Brave -> DuckDuckGo)\n"
-                message += "💡 Klik link untuk melihat detail & verifikasi harga"
-
-                return {
-                    "success": True,
-                    "item": item_name,
-                    "price_range": {
-                        "min": min_price,
-                        "max": max_price,
-                        "avg": avg_price
-                    },
-                    "source": "Web Search MCP (Bing/Brave/DuckDuckGo)",
-                    "sample_count": len(all_prices),
-                    "sources": price_sources[:5],  # Top 5 sources
-                    "message": message
-                }
-            else:
-                return {
-                    "success": False,
-                    "item": item_name,
-                    "message": f"🔍 Pencarian web selesai, tapi tidak menemukan harga spesifik untuk '{item_name}'.\n" +
-                              "Coba sebutkan item dengan lebih detail (contoh: 'iPhone 15 Pro', 'Laptop Asus ROG')"
-                }
+            return result
 
         except Exception as e:
             logger.error(f"Error extracting prices: {e}", exc_info=True)
