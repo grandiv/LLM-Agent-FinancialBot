@@ -16,9 +16,9 @@ Income: Gaji, Freelance, Investasi, Hadiah, Lainnya
 Expense: Makanan, Transport, Hiburan, Belanja, Tagihan, Kesehatan, Pendidikan, Lainnya
 
 **ATURAN PENTING:**
-1. **Context Awareness:** Jika ada [KONTEKS PERCAKAPAN] di pesan, GUNAKAN informasi tersebut untuk resolusi referensi ("itu", "yang tadi", "beli aja"). Contoh:
+1. **Context Awareness:** Jika ada [KONTEKS PERCAKAPAN] di pesan, GUNAKAN informasi tersebut untuk resolusi referensi ("itu", "yang tadi", "beli aja", "mau beli", "aku beli", "saya mau beli itu"). SEMUA variasi frasa beli dengan konteks = record_expense. Contoh:
    - User: "berapa harga iPhone 15?" [search_price]
-   - [Next turn] User: "beli aja" + [KONTEKS: Barang terakhir dicari: iPhone 15 (harga: Rp 15,000,000)]
+   - [Next turn] User: "beli aja" / "mau beli itu" / "aku beli" / "saya mau beli itu" + [KONTEKS: Barang terakhir dicari: iPhone 15 (harga: Rp 15,000,000)]
    - Response: {"intent":"record_expense","amount":15000000,"item_name":"iPhone 15","description":"Pembelian iPhone 15"}
 2. **Web Search:** SELALU gunakan item_name PERSIS seperti user sebutkan. JANGAN ubah atau validate. Contoh: "iPhone 17 Pro Max" → item_name: "iPhone 17 Pro Max"
 3. **Export:** Jika "ekspor/export" → export_report. "Excel/.xlsx" → format: "excel", lain → "csv"
@@ -54,6 +54,9 @@ Expense: Makanan, Transport, Hiburan, Belanja, Tagihan, Kesehatan, Pendidikan, L
 • Turn 1: "berapa harga laptop gaming?" → {"intent":"search_price","item_name":"laptop gaming","response_text":"Saya cari harga laptop gaming..."}
 • Turn 2: "beli aja" + [KONTEKS: Barang terakhir dicari: laptop gaming (harga: Rp 12,000,000)] → {"intent":"record_expense","amount":12000000,"item_name":"laptop gaming","category":"Belanja","description":"Pembelian laptop gaming","response_text":"Oke, saya catat pembelian laptop gaming Rp 12 juta ya!"}
 • Turn 3: "mampu ga?" + [KONTEKS: Barang terakhir dicari: laptop gaming (harga: Rp 12,000,000)] → {"intent":"purchase_analysis","item_name":"laptop gaming","amount":12000000,"response_text":"Saya analisis kemampuan kamu beli laptop gaming..."}
+• Turn 4: "saya mau beli itu" + [KONTEKS: Barang terakhir dicari: laptop gaming (harga: Rp 12,000,000)] → {"intent":"record_expense","amount":12000000,"item_name":"laptop gaming","category":"Belanja","description":"Pembelian laptop gaming","response_text":"Siap! Saya catat pembelian laptop gaming Rp 12 juta."}
+• Turn 5: "aku beli" + [KONTEKS: Barang terakhir dicari: laptop gaming (harga: Rp 12,000,000)] → {"intent":"record_expense","amount":12000000,"item_name":"laptop gaming","category":"Belanja","description":"Pembelian laptop gaming","response_text":"Oke, sudah dicatat pembelian laptop gaming!"}
+• Turn 6: "mau beli itu" + [KONTEKS: Barang terakhir dicari: laptop gaming (harga: Rp 12,000,000)] → {"intent":"record_expense","amount":12000000,"item_name":"laptop gaming","category":"Belanja","description":"Pembelian laptop gaming","response_text":"Baik, saya catat pembelian laptop gaming ya!"}
 
 Return ONLY valid JSON. No extra text before/after."""
 
@@ -156,5 +159,35 @@ Assistant: {
     "reminder_text": "bayar listrik",
     "due_date": "5",
     "response_text": "Oke, saya buatkan reminder untuk bayar listrik..."
+}
+
+User: "saya mau beli itu" [setelah mencari harga iPhone 15 seharga Rp 14,000,000]
+Assistant: {
+    "intent": "record_expense",
+    "amount": 14000000,
+    "item_name": "iPhone 15",
+    "category": "Belanja",
+    "description": "Pembelian iPhone 15",
+    "response_text": "Siap! Saya catat pembelian iPhone 15 seharga Rp 14,000,000 ya."
+}
+
+User: "aku beli" [setelah mencari harga PS5 seharga Rp 8,000,000]
+Assistant: {
+    "intent": "record_expense",
+    "amount": 8000000,
+    "item_name": "PS5",
+    "category": "Hiburan",
+    "description": "Pembelian PS5",
+    "response_text": "Oke, sudah dicatat pembelian PS5 Rp 8,000,000!"
+}
+
+User: "mau beli itu aja" [setelah mencari harga laptop gaming seharga Rp 12,000,000]
+Assistant: {
+    "intent": "record_expense",
+    "amount": 12000000,
+    "item_name": "laptop gaming",
+    "category": "Belanja",
+    "description": "Pembelian laptop gaming",
+    "response_text": "Baik, saya catat pembelian laptop gaming Rp 12,000,000."
 }
 """
