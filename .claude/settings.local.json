@@ -3,7 +3,19 @@
     "allow": [
       "Bash(dir C:ProjectsFinancialBot /s /b)",
       "Read(//c/Projects/FinancialBot/**)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "WebFetch(domain:github.com)",
+      "WebSearch",
+      "WebFetch(domain:www.npmjs.com)",
+      "Bash(python test_google_search.py:*)",
+      "Bash(pip install:*)",
+      "Bash(chcp 65001)",
+      "Bash(PYTHONIOENCODING=utf-8 python:*)",
+      "Bash(python -c:*)",
+      "Bash(python:*)",
+      "Bash(LOG_LEVEL=DEBUG PYTHONIOENCODING=utf-8 python:*)",
+      "Bash(LOG_LEVEL=INFO PYTHONIOENCODING=utf-8 python:*)",
+      "Bash(git restore:*)"
     ],
     "deny": [],
     "ask": []

@@ -70,6 +70,15 @@ class FinancialDiscordBot(discord.Client):
         logger.info(f'Bot logged in as {self.user} (ID: {self.user.id})')
         logger.info('------')
 
+        # Initialize MCP connections
+        print('🔄 Initializing MCP servers...')
+        try:
+            await self.bot_core.mcp.initialize_mcp()
+            print('✅ MCP servers initialized')
+        except Exception as e:
+            logger.warning(f'MCP initialization warning: {e}')
+            print(f'⚠️  MCP initialization completed with warnings (bot will use fallback methods)')
+
         # Set bot status
         await self.change_presence(
             activity=discord.Activity(
@@ -113,7 +122,7 @@ class FinancialDiscordBot(discord.Client):
                 user_id = str(message.author.id)
                 username = message.author.display_name
 
-                response = self.bot_core.process_message(user_id, username, content)
+                response = await self.bot_core.process_message(user_id, username, content)
 
             # Check if response includes file to upload
             file_to_upload = None

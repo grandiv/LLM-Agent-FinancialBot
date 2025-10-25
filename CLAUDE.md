@@ -193,17 +193,36 @@ Categories are pre-populated in `database.py` init. To add: insert into categori
 
 ## MCP Integration (Model Context Protocol)
 
-The bot uses MCP to provide enhanced capabilities beyond basic LLM chat:
+The bot uses MCP (Model Context Protocol) to provide enhanced capabilities beyond basic LLM chat.
+
+**MCP Architecture:**
+- **MCP Client** (Python SDK) - Manages connections to MCP servers
+- **MCP Servers** (Node.js processes) - External tools running via stdio
+- **Graceful Fallback** - Bot works even if MCP servers unavailable
+
+### Active MCP Integrations:
+
+**1. Google Programmable Search Engine MCP** (`@rendyfebry/google-pse-mcp`) - **REAL-TIME**
+- Replaces simulated price database with actual Google web search
+- Searches Indonesian marketplaces (Tokopedia, Shopee, Bukalapak)
+- Extracts real prices from search results
+- Free tier: 100 searches/day (forever free!)
+- **Setup required:**
+  - Create Custom Search Engine: https://programmablesearchengine.google.com/
+  - Get API key from Google Cloud: https://console.cloud.google.com/apis/credentials
+
+### Local MCP Tools (No external setup needed):
 
 **1. File System Server** (`mcp_manager.py:export_to_csv/excel`):
 - Exports transaction history to CSV or Excel
 - Excel exports include 3 sheets: Transactions, Summary, Categories
 - Files saved to `exports/` directory
 
-**2. Web Search Server** (`mcp_manager.py:search_price`):
-- Simulated price lookup for common items (laptop, iPhone, PS5, etc.)
+**2. Web Search** (`mcp_manager.py:search_price`):
+- **Primary:** Real-time Google Search MCP (if configured)
+- **Fallback:** Simulated price database for common items
 - Returns price ranges (min, max, avg) for purchase analysis
-- Auto-integrated with `purchase_analysis` intent when price not specified
+- Auto-integrated with `purchase_analysis` intent
 
 **3. Database Tools Server** (`mcp_manager.py:analyze_spending_trends`):
 - Uses pandas for advanced analytics
@@ -217,12 +236,27 @@ The bot uses MCP to provide enhanced capabilities beyond basic LLM chat:
 - Reminder categories and completion tracking
 - Auto-calculates next month for past dates
 
-### Adding New MCP Tools
-1. Add method to `MCPManager` class in `core/mcp_manager.py`
-2. Add new intent to `FUNCTION_TOOLS` in `core/prompts.py`
-3. Create handler in `core/bot_core.py` (e.g., `_handle_new_tool()`)
-4. Add routing case in `process_message()` method
-5. Write tests in `tests/test_mcp_manager.py`
+### Setting Up MCP Servers
+
+**Quick Setup:**
+1. Install Node.js (required for MCP servers)
+2. Create Custom Search Engine at https://programmablesearchengine.google.com/
+3. Get API key from https://console.cloud.google.com/apis/credentials
+4. Add to `.env`:
+   ```
+   GOOGLE_CSE_API_KEY=your_api_key_here
+   GOOGLE_CSE_ID=your_search_engine_id_here
+   ```
+5. Run test: `python test_mcp.py`
+
+**Detailed guide:** See `MCP_SETUP.md`
+
+### Adding New MCP Servers
+1. Add connection in `core/mcp_client.py:initialize()`
+2. Add wrapper methods in `MCPManager` class
+3. Update intent handlers to use new MCP tools
+4. Add fallback logic for when MCP unavailable
+5. Write tests
 
 ## Environment Variables
 
@@ -232,6 +266,12 @@ The bot uses MCP to provide enhanced capabilities beyond basic LLM chat:
 **Ollama Configuration (Optional - defaults usually work):**
 - `OLLAMA_BASE_URL` - Ollama server URL (default: http://localhost:11434)
 - `OLLAMA_MODEL` - Model to use (default: llama3.1:8b)
+
+**MCP Configuration (Optional but recommended):**
+- `GOOGLE_CSE_API_KEY` - Google Custom Search API key for real-time price lookup
+- `GOOGLE_CSE_ID` - Google Custom Search Engine ID
+  - Get from: https://console.cloud.google.com/apis/credentials (API key)
+  - And: https://programmablesearchengine.google.com/ (Search Engine ID)
 
 **Optional:**
 - `DATABASE_PATH` - SQLite database path (default: financial_bot.db)

@@ -28,7 +28,7 @@ class FinancialBotCore:
         self.db = database
         self.mcp = mcp_manager or MCPManager()
 
-    def process_message(self, user_id: str, username: str, message: str):
+    async def process_message(self, user_id: str, username: str, message: str):
         """
         Proses pesan dari user dan return response
 
@@ -119,7 +119,7 @@ class FinancialBotCore:
                 return self._handle_export_report(user_id, result)
 
             elif intent == "search_price":
-                return self._handle_search_price(result)
+                return await self._handle_search_price(result)
 
             elif intent == "analyze_trends":
                 return self._handle_analyze_trends(user_id, result)
@@ -561,7 +561,7 @@ Ngobrol aja dengan natural, aku akan mengerti! 😊
             logger.warning(f"Export failed: {mcp_result['message']}")
             return {"message": mcp_result["message"]}
 
-    def _handle_search_price(self, result: Dict) -> str:
+    async def _handle_search_price(self, result: Dict) -> str:
         """Handle pencarian harga barang online"""
         item_name = result.get("item_name", "")
         base_response = result.get("response_text", "")
@@ -569,19 +569,17 @@ Ngobrol aja dengan natural, aku akan mengerti! 😊
         if not item_name:
             return "Maaf, sebutkan nama barang yang ingin dicari harganya ya! 🔍"
 
-        # Run async search - use asyncio.run to handle event loop properly
+        # Run async search directly (we're in an async context now)
         try:
-            # Try to get existing loop
-            try:
-                loop = asyncio.get_running_loop()
-                # If we're already in an async context, create a task
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, self.mcp.search_price(item_name))
-                    mcp_result = future.result()
-            except RuntimeError:
-                # No running loop, safe to use asyncio.run
-                mcp_result = asyncio.run(self.mcp.search_price(item_name))
+            # Add timeout to prevent long waits
+            mcp_result = await asyncio.wait_for(
+                self.mcp.search_price(item_name),
+                timeout=30.0
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Search timed out after 30 seconds, using database fallback")
+            # Return database fallback immediately
+            mcp_result = await self.mcp._search_price_fallback(item_name)
         except Exception as e:
             logger.error(f"Error in search_price: {e}", exc_info=True)
             return "Maaf, terjadi kesalahan saat mencari harga. Coba lagi ya! 🔍"

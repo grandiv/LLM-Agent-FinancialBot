@@ -4,6 +4,7 @@ CLI Mode untuk testing bot tanpa perlu Discord
 
 import os
 import sys
+import asyncio
 import logging
 from dotenv import load_dotenv
 
@@ -51,7 +52,7 @@ Contoh pesan:
 """
     print(banner)
 
-def main():
+async def main():
     """Main CLI function"""
     print_banner()
 
@@ -105,13 +106,13 @@ def main():
                 continue
 
             elif user_input.lower() == '/help':
-                response = bot_core.process_message(cli_user_id, cli_username, "help")
+                response = await bot_core.process_message(cli_user_id, cli_username, "help")
                 print(f"\n🤖 Bot:\n{response}\n")
                 continue
 
             # Process message
             print("\n⏳ Memproses...")
-            response = bot_core.process_message(cli_user_id, cli_username, user_input)
+            response = await bot_core.process_message(cli_user_id, cli_username, user_input)
 
             # Handle dict response (file export)
             if isinstance(response, dict):
@@ -134,4 +135,4 @@ def main():
             logger.error(f"Error in CLI loop: {e}", exc_info=True)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
